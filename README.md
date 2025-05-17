@@ -1,9 +1,27 @@
 # 🛡️ VIPER - Vulnerability Intelligence, Prioritization, and Exploitation Reporter
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **VIPER is your AI-powered co-pilot in the complex world of cyber threats, designed to provide actionable Vulnerability Intelligence, Prioritization, and Exploitation Reporting.**
 
 In an era of ever-increasing cyber threats, VIPER cuts through the noise. It ingests data from critical sources like NVD, EPSS, and the CISA KEV catalog, then leverages Google Gemini AI for deep contextual analysis and vulnerability prioritization. All this intelligence is centralized, enriched, and presented through an interactive Streamlit dashboard, empowering security teams to focus on what truly matters and remediate effectively.
+
+## Dashboard
+
+VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerability data:
+
+### Home Screen
+![Home](https://i.imgur.com/5Ri40Oc.png)
+
+### Main Dashboard
+![Dashboard](https://i.imgur.com/yT3PKpU.png)
+
+### Detailed Analysis View
+![Detailed Analysis](https://i.imgur.com/YnYxObv.png)
+
+### Analytics & Trends
+![Analytics](https://i.imgur.com/uWX0Y2g.png)
+
 
 ## ✨ Core Features
 
@@ -11,12 +29,12 @@ In an era of ever-increasing cyber threats, VIPER cuts through the noise. It ing
     * ✅ **NVD (National Vulnerability Database):** Up-to-the-minute CVE information.
     * ✅ **EPSS (Exploit Prediction Scoring System):** Likelihood sıcaklık of vulnerability exploitation.
     * ✅ **CISA KEV (Known Exploited Vulnerabilities) Catalog:** Confirmed actively exploited vulnerabilities.
-    * *(Planned: Microsoft Patch Tuesday, MalwareBazaar, Semantic Web Search, Social Media Trends)*
+    * ✅ **Microsoft Patch Tuesday Updates:** Security bulletins and patch information.
 * **AI-Powered Analysis & Prioritization:**
     * 🧠 Deep contextual analysis of CVE descriptions and related data using **Google Gemini AI**.
     * Automated priority assignment (HIGH, MEDIUM, LOW) based on AI assessment.
 * **Comprehensive Risk Scoring:**
-    * 📈 Customizable weighted risk scoring combining CVSS, EPSS, KEV status, and Gemini AI analysis.
+    * 📈 Customizable weighted risk scoring combining CVSS, EPSS, KEV status, Microsoft severity, and Gemini AI analysis.
     * Configurable boost factor for vulnerabilities present in the CISA KEV catalog.
 * **Automated Alert Generation:**
     * 🔔 Configurable rules engine to generate alerts for critical vulnerabilities based on EPSS scores, CVSS & EPSS combinations, keyword matches, KEV status, and AI-assigned priority.
@@ -115,6 +133,7 @@ The dashboard provides:
 - Detailed analysis of individual CVEs
 - Risk scoring and alert information
 - CISA KEV catalog integration
+- Microsoft Patch Tuesday analysis
 
 ## Project Structure
 
@@ -132,15 +151,17 @@ viper/
 │   └── run_dashboard.sh     # Script to run the dashboard
 ├── src/                     # Source code
 │   ├── clients/             # API clients
-│   │   ├── cisa_kev_client.py   # CISA KEV API client
-│   │   ├── epss_client.py       # EPSS API client
-│   │   └── nvd_client.py        # NVD API client
+│   │   ├── cisa_kev_client.py        # CISA KEV API client
+│   │   ├── epss_client.py            # EPSS API client
+│   │   ├── nvd_client.py             # NVD API client
+│   │   └── microsoft_update_client.py # Microsoft Patch Tuesday API client
 │   ├── dashboard/           # Dashboard application
 │   │   ├── app.py              # Main dashboard app
 │   │   └── pages/              # Dashboard pages
-│   │       ├── 01_Dashboard.py      # Main dashboard page
-│   │       ├── 02_Detailed_Analysis.py # Detailed CVE analysis page
-│   │       └── 03_Analytics.py      # Analytics and trends page
+│   │       ├── 01_Dashboard.py           # Main dashboard page
+│   │       ├── 02_Detailed_Analysis.py   # Detailed CVE analysis page
+│   │       ├── 03_Analytics.py           # Analytics and trends page
+│   │       └── 04_Microsoft_Analysis.py  # Microsoft Patch Tuesday analysis
 │   ├── utils/               # Utility modules
 │   │   ├── config.py            # Configuration management
 │   │   └── database_handler.py  # Database operations
