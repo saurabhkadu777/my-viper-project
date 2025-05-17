@@ -794,6 +794,13 @@ def update_cve_microsoft_data(
     """
     conn = None
     try:
+        # Ensure all parameters are strings or None
+        msrc_id_str = str(msrc_id) if msrc_id is not None else None
+        product_family_str = str(product_family) if product_family is not None else None
+        product_name_str = str(product_name) if product_name is not None else None
+        severity_str = str(severity) if severity is not None else None
+        pt_date_str = str(pt_date) if pt_date is not None else None
+        
         conn = sqlite3.connect(get_db_file_name())
         cursor = conn.cursor()
         
@@ -805,12 +812,12 @@ def update_cve_microsoft_data(
             microsoft_severity = ?,
             patch_tuesday_date = ?
         WHERE cve_id = ?
-        ''', (msrc_id, product_family, product_name, severity, pt_date, cve_id))
+        ''', (msrc_id_str, product_family_str, product_name_str, severity_str, pt_date_str, cve_id))
         
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with Microsoft data (severity: {severity}, product: {product_family})")
+            logger.info(f"Updated CVE {cve_id} with Microsoft data (severity: {severity_str}, product: {product_family_str})")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id} for Microsoft data update")
