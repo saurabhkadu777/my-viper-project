@@ -131,9 +131,9 @@ df = pd.DataFrame(st.session_state.cve_data)
 
 # Convert date strings to datetime
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'])
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'])
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
 
 # --- Metrics Section ---
 st.subheader("Summary Metrics")

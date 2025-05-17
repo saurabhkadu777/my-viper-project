@@ -38,11 +38,11 @@ df = pd.DataFrame(all_cve_data)
 
 # Convert date strings to datetime
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'])
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce')
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
 if 'processed_at' in df.columns:
-    df['processed_at'] = pd.to_datetime(df['processed_at'], errors='coerce')
+    df['processed_at'] = pd.to_datetime(df['processed_at'], errors='coerce', format='mixed')
 
 # Add time range selection
 st.sidebar.header("Time Range")
@@ -61,8 +61,8 @@ date_range = st.sidebar.date_input(
 # Apply date filter if both dates are selected
 if len(date_range) == 2:
     start_date, end_date = date_range
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date) + timedelta(days=1)  # Include end date
+    start_date = pd.to_datetime(start_date, errors='coerce')
+    end_date = pd.to_datetime(end_date, errors='coerce') + timedelta(days=1)  # Include end date
     
     df = df[(df['published_date'] >= start_date) & (df['published_date'] < end_date)]
 

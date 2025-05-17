@@ -148,18 +148,67 @@ def get_db_file_name():
     """
     Retrieves the database file name.
     Defaults to 'threat_intel_gemini_mvp.db' if not specified.
+    Returns the absolute path to ensure consistent access.
+    Creates necessary directories if they don't exist.
     
     Returns:
-        str: The database file name
+        str: The absolute path to the database file
     """
     db_file = os.getenv("DB_FILE_NAME", "")
     
     if not db_file:
         default = "threat_intel_gemini_mvp.db"
         logger.warning(f"DB_FILE_NAME not found in environment variables. Using default: {default}")
-        return default
+        db_file = default
+    
+    # First, try data directory
+    try:
+        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_dir = os.path.join(script_dir, 'data')
         
-    return db_file
+        # Create data directory if it doesn't exist
+        if not os.path.exists(data_dir):
+            logger.info(f"Creating data directory at: {data_dir}")
+            os.makedirs(data_dir, exist_ok=True)
+        
+        # Return path in data directory
+        db_path = os.path.join(data_dir, db_file)
+        logger.info(f"Using database file in data directory: {db_path}")
+        
+        # Test if the directory is writable
+        test_file = os.path.join(data_dir, '.writetest')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            logger.info(f"Data directory is writable: {data_dir}")
+            return db_path
+        except (IOError, PermissionError) as e:
+            logger.warning(f"Data directory not writable: {str(e)}")
+            # Fall through to use project root
+    except Exception as e:
+        logger.warning(f"Error setting up data directory: {str(e)}")
+        # Fall through to use project root or absolute path
+    
+    # If an absolute path is provided, use it
+    if os.path.isabs(db_file):
+        # Ensure the directory exists
+        db_dir = os.path.dirname(db_file)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                logger.info(f"Creating directory for absolute DB path: {db_dir}")
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create directory for DB: {str(e)}")
+        
+        logger.info(f"Using database at absolute path: {db_file}")
+        return db_file
+    
+    # Use project root as fallback
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    abs_path = os.path.join(root_dir, db_file)
+    logger.info(f"Using database file in project root: {abs_path}")
+    return abs_path
 
 def get_log_file_name():
     """

@@ -5,6 +5,8 @@ Handles storing and retrieving CVE data using SQLite.
 import sqlite3
 import logging
 import json
+import os
+import traceback
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 from .config import get_db_file_name
@@ -12,12 +14,34 @@ from .config import get_db_file_name
 # Initialize module logger
 logger = logging.getLogger(__name__)
 
+# Add direct file logging for critical database operations
+def log_to_file(message):
+    """Write directly to a debug log file for database operations"""
+    try:
+        with open("database_debug.log", "a") as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{timestamp} - {message}\n")
+    except Exception as e:
+        # If we can't log to file, at least try the normal logger
+        logger.error(f"Failed to write to debug log: {e}")
+
 def initialize_db():
     """
     Initializes the database by creating the necessary tables if they don't exist.
+    Also ensures that the database directory exists.
     """
+    db_path = get_db_file_name()
+    
+    # Ensure database directory exists
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        logger.info(f"Creating database directory: {db_dir}")
+        os.makedirs(db_dir, exist_ok=True)
+    
+    conn = None
     try:
-        conn = sqlite3.connect(get_db_file_name())
+        logger.info(f"Initializing database at: {db_path}")
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
         # Create the cves table if it doesn't exist
@@ -91,6 +115,7 @@ def initialize_db():
         logger.info("Database initialized successfully")
     except sqlite3.Error as e:
         logger.error(f"Database initialization error: {str(e)}")
+        logger.error(traceback.format_exc())
     finally:
         if conn:
             conn.close()
@@ -900,4 +925,296 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
         return None
     finally:
         if conn:
-            conn.close() 
+            conn.close()
+
+def store_or_update_cve(cve_data):
+    """
+    Stores a single CVE in the database, or updates it if it already exists.
+    Unlike store_cves which uses INSERT OR IGNORE, this function will update
+    existing records with new information.
+    
+    Args:
+        cve_data (dict): A dictionary containing CVE data.
+        
+    Returns:
+        bool: True if the operation was successful, False otherwise.
+    """
+    if not cve_data or 'cve_id' not in cve_data:
+        logger.warning("Invalid CVE data provided")
+        log_to_file("Invalid CVE data provided - missing cve_id")
+        return False
+    
+    cve_id = cve_data.get('cve_id')
+    logger.info(f"store_or_update_cve called for {cve_id}")
+    log_to_file(f"store_or_update_cve called for {cve_id}")
+    
+    # Initialize database if not already done
+    try:
+        initialize_db()
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {str(e)}")
+        log_to_file(f"Database initialization failed: {str(e)}")
+        return False
+    
+    conn = None
+    try:
+        # Get absolute database path
+        db_path = get_db_file_name()
+        if not os.path.isabs(db_path):
+            abs_db_path = os.path.abspath(db_path)
+        else:
+            abs_db_path = db_path
+            
+        logger.info(f"Database absolute path: {abs_db_path}")
+        log_to_file(f"Database path: {abs_db_path}")
+        
+        # Check if database directory exists
+        db_dir = os.path.dirname(abs_db_path)
+        if db_dir and not os.path.exists(db_dir):
+            log_to_file(f"Creating missing database directory: {db_dir}")
+            os.makedirs(db_dir, exist_ok=True)
+        
+        # Test file permissions
+        if os.path.exists(abs_db_path):
+            try:
+                # Test read permissions
+                with open(abs_db_path, 'rb'):
+                    pass
+                # Test write permissions by opening in append mode
+                with open(abs_db_path, 'ab'):
+                    pass
+                log_to_file(f"Database file permissions verified: {abs_db_path}")
+            except (IOError, PermissionError) as e:
+                log_to_file(f"Permission error on database file: {str(e)}")
+                logger.error(f"Permission error on database file: {str(e)}")
+                return False
+            
+        # Connect to database with timeout and isolation level settings
+        conn = sqlite3.connect(abs_db_path, timeout=20.0, isolation_level="EXCLUSIVE")
+        cursor = conn.cursor()
+        
+        # Check if the CVE already exists
+        cursor.execute("SELECT 1 FROM cves WHERE cve_id = ?", (cve_id,))
+        exists = cursor.fetchone() is not None
+        logger.info(f"CVE {cve_id} exists in database: {exists}")
+        log_to_file(f"CVE exists in DB: {exists}")
+        
+        if exists:
+            # Update existing CVE
+            logger.info(f"Updating existing CVE {cve_id}")
+            
+            # Build the update query based on available data
+            update_fields = []
+            update_values = []
+            
+            if 'description' in cve_data and cve_data['description']:
+                update_fields.append('description = ?')
+                update_values.append(cve_data['description'])
+                
+            if 'cvss_v3_score' in cve_data and cve_data['cvss_v3_score'] is not None:
+                update_fields.append('cvss_v3_score = ?')
+                update_values.append(cve_data['cvss_v3_score'])
+                
+            if 'published_date' in cve_data and cve_data['published_date']:
+                update_fields.append('published_date = ?')
+                update_values.append(cve_data['published_date'])
+
+            if 'gemini_priority' in cve_data and cve_data['gemini_priority']:
+                update_fields.append('gemini_priority = ?')
+                update_values.append(cve_data['gemini_priority'])
+                
+            if 'gemini_raw_response' in cve_data and cve_data['gemini_raw_response']:
+                update_fields.append('gemini_raw_response = ?')
+                update_values.append(cve_data['gemini_raw_response'])
+                
+            if 'processed_at' in cve_data and cve_data['processed_at']:
+                update_fields.append('processed_at = ?')
+                update_values.append(cve_data['processed_at'])
+            else:
+                # Add current timestamp
+                update_fields.append('processed_at = ?')
+                update_values.append(datetime.now().isoformat())
+                
+            if 'epss_score' in cve_data and cve_data['epss_score'] is not None:
+                update_fields.append('epss_score = ?')
+                update_values.append(cve_data['epss_score'])
+                
+            if 'epss_percentile' in cve_data and cve_data['epss_percentile'] is not None:
+                update_fields.append('epss_percentile = ?')
+                update_values.append(cve_data['epss_percentile'])
+                
+            if 'is_in_kev' in cve_data:
+                update_fields.append('is_in_kev = ?')
+                update_values.append(1 if cve_data['is_in_kev'] else 0)
+                
+            if 'kev_date_added' in cve_data and cve_data['kev_date_added']:
+                update_fields.append('kev_date_added = ?')
+                update_values.append(cve_data['kev_date_added'])
+                
+            if 'risk_score' in cve_data and cve_data['risk_score'] is not None:
+                update_fields.append('risk_score = ?')
+                update_values.append(cve_data['risk_score'])
+                
+            if 'alerts' in cve_data and cve_data['alerts']:
+                update_fields.append('alerts = ?')
+                try:
+                    update_values.append(json.dumps(cve_data['alerts']))
+                except Exception as e:
+                    log_to_file(f"Error serializing alerts to JSON: {str(e)}")
+                    # Use a string representation as fallback
+                    update_values.append(str(cve_data['alerts']))
+                
+            if 'msrc_id' in cve_data and cve_data['msrc_id']:
+                update_fields.append('msrc_id = ?')
+                update_values.append(cve_data['msrc_id'])
+                
+            if 'microsoft_product_family' in cve_data and cve_data['microsoft_product_family']:
+                update_fields.append('microsoft_product_family = ?')
+                update_values.append(cve_data['microsoft_product_family'])
+                
+            if 'microsoft_product_name' in cve_data and cve_data['microsoft_product_name']:
+                update_fields.append('microsoft_product_name = ?')
+                update_values.append(cve_data['microsoft_product_name'])
+                
+            if 'microsoft_severity' in cve_data and cve_data['microsoft_severity']:
+                update_fields.append('microsoft_severity = ?')
+                update_values.append(cve_data['microsoft_severity'])
+                
+            if 'patch_tuesday_date' in cve_data and cve_data['patch_tuesday_date']:
+                update_fields.append('patch_tuesday_date = ?')
+                update_values.append(cve_data['patch_tuesday_date'])
+            
+            if not update_fields:
+                logger.warning(f"No fields to update for CVE {cve_id}")
+                return True  # No error, just nothing to update
+                
+            # Construct and execute update query
+            update_query = f"UPDATE cves SET {', '.join(update_fields)} WHERE cve_id = ?"
+            update_values.append(cve_id)
+            
+            logger.info(f"Executing query: {update_query} with params: {update_values}")
+            log_to_file(f"Executing UPDATE for {cve_id}")
+            
+            cursor.execute(update_query, update_values)
+            affected_rows = cursor.rowcount
+            log_to_file(f"Update affected {affected_rows} rows")
+        else:
+            # Insert new CVE
+            logger.info(f"Inserting new CVE {cve_id}")
+            log_to_file(f"Inserting new CVE {cve_id}")
+            
+            # Prepare values for comprehensive insert
+            fields = ['cve_id', 'description', 'cvss_v3_score', 'published_date']
+            values = [
+                cve_id,
+                cve_data.get('description'),
+                cve_data.get('cvss_v3_score'),
+                cve_data.get('published_date')
+            ]
+            
+            # Add optional fields if they exist
+            if 'gemini_priority' in cve_data:
+                fields.append('gemini_priority')
+                values.append(cve_data.get('gemini_priority'))
+                
+            if 'gemini_raw_response' in cve_data:
+                fields.append('gemini_raw_response')
+                values.append(cve_data.get('gemini_raw_response'))
+                
+            # Add processed timestamp
+            fields.append('processed_at')
+            values.append(cve_data.get('processed_at', datetime.now().isoformat()))
+                
+            if 'epss_score' in cve_data:
+                fields.append('epss_score')
+                values.append(cve_data.get('epss_score'))
+                
+            if 'epss_percentile' in cve_data:
+                fields.append('epss_percentile')
+                values.append(cve_data.get('epss_percentile'))
+                
+            if 'is_in_kev' in cve_data:
+                fields.append('is_in_kev')
+                values.append(1 if cve_data.get('is_in_kev') else 0)
+                
+            if 'kev_date_added' in cve_data:
+                fields.append('kev_date_added')
+                values.append(cve_data.get('kev_date_added'))
+                
+            if 'risk_score' in cve_data:
+                fields.append('risk_score')
+                values.append(cve_data.get('risk_score'))
+                
+            if 'alerts' in cve_data and cve_data['alerts']:
+                fields.append('alerts')
+                try:
+                    values.append(json.dumps(cve_data.get('alerts', [])))
+                except Exception as e:
+                    log_to_file(f"Error serializing alerts to JSON: {str(e)}")
+                    # Use a string representation as fallback
+                    values.append(str(cve_data.get('alerts', [])))
+                
+            if 'msrc_id' in cve_data:
+                fields.append('msrc_id')
+                values.append(cve_data.get('msrc_id'))
+                
+            if 'microsoft_product_family' in cve_data:
+                fields.append('microsoft_product_family')
+                values.append(cve_data.get('microsoft_product_family'))
+                
+            if 'microsoft_product_name' in cve_data:
+                fields.append('microsoft_product_name')
+                values.append(cve_data.get('microsoft_product_name'))
+                
+            if 'microsoft_severity' in cve_data:
+                fields.append('microsoft_severity')
+                values.append(cve_data.get('microsoft_severity'))
+                
+            if 'patch_tuesday_date' in cve_data:
+                fields.append('patch_tuesday_date')
+                values.append(cve_data.get('patch_tuesday_date'))
+            
+            # Construct and execute insert query
+            placeholders = ', '.join(['?' for _ in fields])
+            insert_query = f"INSERT INTO cves ({', '.join(fields)}) VALUES ({placeholders})"
+            
+            logger.info(f"Executing query: {insert_query}")
+            log_to_file(f"Executing INSERT for {cve_id}")
+            
+            cursor.execute(insert_query, values)
+            affected_rows = cursor.rowcount
+            log_to_file(f"Insert affected {affected_rows} rows")
+        
+        # Commit transaction
+        conn.commit()
+        log_to_file(f"Transaction committed for {cve_id}")
+        
+        # Verify the operation
+        cursor.execute("SELECT cve_id, processed_at FROM cves WHERE cve_id = ?", (cve_id,))
+        verification = cursor.fetchone()
+        if verification:
+            log_to_file(f"Verification successful: CVE {cve_id} exists with timestamp {verification[1]}")
+            return True
+        else:
+            log_to_file(f"Verification failed: CVE {cve_id} not found after save operation")
+            return False
+            
+    except sqlite3.Error as e:
+        logger.error(f"Database error while storing/updating CVE {cve_id}: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        log_to_file(f"SQLite error for {cve_id}: {str(e)}")
+        log_to_file(traceback.format_exc())
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error while storing/updating CVE {cve_id}: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        log_to_file(f"Unexpected error for {cve_id}: {str(e)}")
+        log_to_file(traceback.format_exc())
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+                log_to_file("Database connection closed")
+            except Exception as e:
+                log_to_file(f"Error closing connection: {str(e)}") 

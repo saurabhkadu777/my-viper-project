@@ -82,11 +82,12 @@ if not st.session_state.detailed_cve_data:
 # Convert to DataFrame
 df = pd.DataFrame(st.session_state.detailed_cve_data)
 
-# Convert date strings to datetime
+# Convert date strings to datetime with error handling
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'])
+    # Use 'coerce' errors to handle various date formats
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'])
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
 
 # Get a list of CVE IDs for selection
 cve_list = df['cve_id'].tolist()

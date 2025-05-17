@@ -45,9 +45,9 @@ df = pd.DataFrame(microsoft_cves)
 
 # Convert date strings to datetime
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'])
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
 if 'patch_tuesday_date' in df.columns:
-    df['patch_tuesday_date'] = pd.to_datetime(df['patch_tuesday_date'])
+    df['patch_tuesday_date'] = pd.to_datetime(df['patch_tuesday_date'], errors='coerce', format='mixed')
 
 # Sidebar filters
 st.sidebar.header("Microsoft Filters")

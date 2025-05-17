@@ -53,7 +53,7 @@ def _fetch_from_epss_api(params):
     response.raise_for_status()
     return response.json()
 
-def get_epss_score(cve_id: str) -> Optional[Dict[str, float]]:
+def get_epss_score(cve_id: str) -> tuple:
     """
     Retrieves the EPSS score and percentile for a specific CVE.
     
@@ -61,13 +61,11 @@ def get_epss_score(cve_id: str) -> Optional[Dict[str, float]]:
         cve_id (str): The CVE ID to look up (e.g., "CVE-2023-12345").
         
     Returns:
-        Optional[Dict[str, float]]: A dictionary containing 'epss' (probability) and 'percentile' values if found,
-                         or None if not found or an error occurred.
-                         Example: {'epss': 0.75, 'percentile': 0.95}
+        tuple: A tuple containing (epss_score, epss_percentile) or (None, None) if not found.
     """
     if not cve_id or not cve_id.startswith("CVE-"):
         logger.error(f"Invalid CVE ID format: {cve_id}")
-        return None
+        return None, None
     
     try:
         logger.info(f"Fetching EPSS score for {cve_id}")
@@ -86,25 +84,23 @@ def get_epss_score(cve_id: str) -> Optional[Dict[str, float]]:
             # EPSS API returns scores as strings, convert to float
             cve_data = response_data["data"][0]
             if "epss" in cve_data and "percentile" in cve_data:
-                result = {
-                    "epss": float(cve_data["epss"]),
-                    "percentile": float(cve_data["percentile"])
-                }
-                logger.info(f"EPSS data for {cve_id}: score={result['epss']:.4f}, percentile={result['percentile']:.4f}")
-                return result
+                epss_score = float(cve_data["epss"])
+                epss_percentile = float(cve_data["percentile"])
+                logger.info(f"EPSS data for {cve_id}: score={epss_score:.4f}, percentile={epss_percentile:.4f}")
+                return epss_score, epss_percentile
         
         logger.warning(f"No EPSS data found for {cve_id}")
-        return None
+        return None, None
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching EPSS data for {cve_id}: {str(e)}")
-        return None
+        return None, None
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f"Error parsing EPSS data for {cve_id}: {str(e)}")
-        return None
+        return None, None
     except Exception as e:
         logger.error(f"Unexpected error fetching EPSS data for {cve_id}: {str(e)}")
-        return None
+        return None, None
 
 def get_epss_scores_batch(cve_ids: List[str]) -> Dict[str, Optional[Dict[str, float]]]:
     """
