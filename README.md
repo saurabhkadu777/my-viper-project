@@ -5,7 +5,17 @@
 **VIPER is your AI-powered co-pilot in the complex world of cyber threats, designed to provide actionable Vulnerability Intelligence, Prioritization, and Exploitation Reporting.**
 
 In an era of ever-increasing cyber threats, VIPER cuts through the noise. It ingests data from critical sources like NVD, EPSS, and the CISA KEV catalog, then leverages Google Gemini AI for deep contextual analysis and vulnerability prioritization. All this intelligence is centralized, enriched, and presented through an interactive Streamlit dashboard, empowering security teams to focus on what truly matters and remediate effectively.
+## 📋 Table of Contents
 
+1.  [🎯 Screenhots](#-main-dashboard)
+2.  [✨ Core Features](#-core-features)
+3.  [🛠️ Live CVE Lookup](#-live-cve-lookup)
+4.  [🛠️ Technology Stack](#-tech-stack)
+5.  [🚀 Installation & Setup](#-installation--setup)
+6.  [⚙️ Usage](#-usage)
+7.  [📈 Development Status & Roadmap](#-project-roadmap--future-vision)
+
+---
 ## Dashboard
 
 VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerability data:
