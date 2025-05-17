@@ -56,6 +56,116 @@ def _fetch_from_nvd_api(params):
     
     return response.json()
 
+def fetch_single_cve_details(cve_id: str) -> dict:
+    """
+    Fetches details for a single CVE from the NVD API.
+    
+    Args:
+        cve_id (str): The CVE ID to fetch (e.g., "CVE-2023-12345").
+        
+    Returns:
+        dict: A dictionary containing the CVE details, or None if not found or an error occurred.
+    """
+    if not cve_id or not cve_id.startswith("CVE-"):
+        logger.error(f"Invalid CVE ID format: {cve_id}")
+        return None
+    
+    try:
+        logger.info(f"Fetching details for {cve_id} from NVD API")
+        
+        # Set up parameters for the API request - using cveId parameter for exact match
+        params = {
+            "cveId": cve_id
+        }
+        
+        # Make the API request with retry logic
+        data = _fetch_from_nvd_api(params)
+        
+        # Check if the CVE was found
+        total_results = data.get("totalResults", 0)
+        if total_results == 0:
+            logger.warning(f"CVE {cve_id} not found in NVD database")
+            return None
+        
+        # Process the CVE data
+        vulnerabilities = data.get("vulnerabilities", [])
+        if not vulnerabilities:
+            logger.warning(f"No vulnerability data returned for {cve_id}")
+            return None
+        
+        # Extract the first (and should be only) CVE entry
+        cve_entry = vulnerabilities[0]
+        cve = cve_entry.get("cve", {})
+        
+        # Extract basic CVE information
+        result = {
+            "cve_id": cve.get("id")
+        }
+        
+        # Extract description (English preferred)
+        for desc_entry in cve.get("descriptions", []):
+            if desc_entry.get("lang") == "en":
+                result["description"] = desc_entry.get("value")
+                break
+        
+        # Extract CVSS v3 score if available
+        metrics = cve.get("metrics", {})
+        # Check both cvssMetricV31 and cvssMetricV30
+        cvss_v3_metrics_list = metrics.get("cvssMetricV31", []) 
+        if not cvss_v3_metrics_list:
+            cvss_v3_metrics_list = metrics.get("cvssMetricV30", [])
+
+        if cvss_v3_metrics_list:
+            cvss_data = cvss_v3_metrics_list[0].get("cvssData", {})
+            result["cvss_v3_score"] = cvss_data.get("baseScore")
+            result["cvss_v3_vector"] = cvss_data.get("vectorString")
+            result["cvss_v3_severity"] = cvss_data.get("baseSeverity")
+        
+        # Extract published and last modified dates
+        result["published_date"] = cve.get("published")
+        result["last_modified_date"] = cve.get("lastModified")
+        
+        # Extract references
+        references = []
+        for ref in cve.get("references", []):
+            references.append({
+                "url": ref.get("url"),
+                "source": ref.get("source"),
+                "tags": ref.get("tags", [])
+            })
+        
+        if references:
+            result["references"] = references
+        
+        # Extract CPE configuration data if available
+        configurations = cve_entry.get("configurations", [])
+        if configurations:
+            cpe_entries = []
+            
+            for config in configurations:
+                for node in config.get("nodes", []):
+                    for cpe_match in node.get("cpeMatch", []):
+                        cpe_data = {
+                            "criteria": cpe_match.get("criteria"),
+                            "vulnerable": cpe_match.get("vulnerable", True)
+                        }
+                        
+                        if cpe_data not in cpe_entries:
+                            cpe_entries.append(cpe_data)
+            
+            if cpe_entries:
+                result["cpe_entries"] = cpe_entries
+        
+        logger.info(f"Successfully fetched details for {cve_id}")
+        return result
+    
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error fetching CVE {cve_id}: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error fetching CVE {cve_id}: {str(e)}")
+        return None
+
 def fetch_recent_cves(days_published_ago=None):
     """
     Fetches CVEs published within the specified number of days up to the current time.

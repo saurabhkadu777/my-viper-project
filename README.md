@@ -19,6 +19,9 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
 ### Detailed Analysis View
 ![Detailed Analysis](https://i.imgur.com/YnYxObv.png)
 
+### Live CVE Lookup
+![Live CVE Lookup](https://i.imgur.com/l4hPoW8.png)
+
 ### Analytics & Trends
 ![Analytics](https://i.imgur.com/uWX0Y2g.png)
 
@@ -47,6 +50,7 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
     * Key Performance Indicator (KPI) metrics and summary statistics.
     * Detailed CVE views with all enriched data points.
     * Trend analysis and visualizations powered by Plotly.
+    * 🔎 **Live CVE Lookup:** Real-time search and analysis of any CVE from NVD.
 * **Resilient API Clients:**
     * 💪 Automated retry mechanisms with exponential backoff for API calls (`tenacity` library).
 * **Flexible Configuration:**
@@ -56,6 +60,25 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
 * **Dual Operation Modes:**
     * 💻 **CLI Mode:** For backend data processing, fetching, and analysis.
     * 📊 **Dashboard Mode:** For interactive visualization and reporting.
+
+## 🔍 Live CVE Lookup
+
+The Live CVE Lookup feature allows you to perform real-time analysis of any CVE:
+
+* **Instant CVE Lookups:** Enter any CVE ID to get comprehensive details.
+* **Local Database First:** Checks your local database before making external API calls.
+* **Dynamic Data Enrichment:**
+  * NVD data with descriptions, CVSS scores, references, and affected products
+  * EPSS exploitation probability scores
+  * CISA KEV status verification
+  * Live Gemini AI analysis and priority assignment
+  * Real-time risk scoring and alert generation
+* **Save to Database:** Option to save or update the analyzed CVE in your local database for future reference.
+
+This feature is ideal for:
+* Investigating breaking vulnerabilities as they're published
+* Ad-hoc analysis of CVEs mentioned in threat reports
+* Quick verification of vulnerability details during incident response
 
 ## 🚀 Tech Stack
 
@@ -133,6 +156,7 @@ The dashboard provides:
 - Risk scoring and alert information
 - CISA KEV catalog integration
 - Microsoft Patch Tuesday analysis
+- Live CVE lookup and real-time analysis
 
 ## Project Structure
 
@@ -159,8 +183,8 @@ viper/
 │   │   └── pages/              # Dashboard pages
 │   │       ├── 01_Dashboard.py           # Main dashboard page
 │   │       ├── 02_Detailed_Analysis.py   # Detailed CVE analysis page
-│   │       ├── 03_Analytics.py           # Analytics and trends page
-│   │       └── 04_Microsoft_Analysis.py  # Microsoft Patch Tuesday analysis
+│   │       ├── 03_Live_CVE_Lookup.py     # Live CVE lookup and analysis
+│   │       └── 04_Analytics.py           # Analytics and trends page
 │   ├── utils/               # Utility modules
 │   │   ├── config.py            # Configuration management
 │   │   └── database_handler.py  # Database operations
@@ -196,6 +220,32 @@ VIPER generates alerts based on configurable rules:
 6. Microsoft Critical - CVEs rated as Critical severity by Microsoft
 
 Alert thresholds can be configured via environment variables (see config.py).
+
+## API Integration
+
+### NVD API
+VIPER integrates with the National Vulnerability Database API to:
+- Fetch recent CVEs based on specified time periods
+- Look up detailed information for specific CVEs
+- Extract CVSS scores, descriptions, and affected products
+
+### EPSS API
+Integration with the FIRST.org EPSS API provides:
+- Probability scores for vulnerability exploitation
+- Percentile ranking for exploitation likelihood
+- Both batch and single-CVE lookup capabilities
+
+### CISA KEV API
+Integration with the CISA Known Exploited Vulnerabilities catalog provides:
+- Status checks for whether CVEs are actively exploited
+- Dates when vulnerabilities were added to the KEV catalog
+- Vendor and product information when available
+
+### Microsoft Security Update API
+Integration with the Microsoft Security Response Center (MSRC) API provides:
+- Patch Tuesday update information
+- Security bulletin details
+- Microsoft-specific vulnerability information and severity ratings
 
 ## Dependencies
 

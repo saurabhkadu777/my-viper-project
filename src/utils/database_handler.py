@@ -828,4 +828,76 @@ def update_cve_microsoft_data(
         return False
     finally:
         if conn:
+            conn.close()
+
+def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves all details for a specific CVE from the database.
+    
+    Args:
+        cve_id (str): The CVE ID to lookup (e.g. 'CVE-2023-12345')
+        
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary containing all CVE details, or None if not found
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row  # This enables column access by name
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
+               processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
+               risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
+               microsoft_severity, patch_tuesday_date
+        FROM cves
+        WHERE cve_id = ?
+        ''', (cve_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            logger.info(f"No CVE found with ID {cve_id}")
+            return None
+            
+        # Parse the JSON alerts
+        alerts_json = row['alerts']
+        if alerts_json:
+            try:
+                alerts = json.loads(alerts_json)
+            except json.JSONDecodeError:
+                alerts = []
+        else:
+            alerts = []
+        
+        # Convert to dictionary
+        cve_data = {
+            'cve_id': row['cve_id'],
+            'description': row['description'],
+            'cvss_v3_score': row['cvss_v3_score'],
+            'published_date': row['published_date'],
+            'gemini_priority': row['gemini_priority'],
+            'processed_at': row['processed_at'],
+            'epss_score': row['epss_score'],
+            'epss_percentile': row['epss_percentile'],
+            'is_in_kev': bool(row['is_in_kev']),
+            'kev_date_added': row['kev_date_added'],
+            'risk_score': row['risk_score'],
+            'alerts': alerts,
+            'msrc_id': row['msrc_id'],
+            'microsoft_product_family': row['microsoft_product_family'],
+            'microsoft_product_name': row['microsoft_product_name'],
+            'microsoft_severity': row['microsoft_severity'],
+            'patch_tuesday_date': row['patch_tuesday_date']
+        }
+        
+        logger.info(f"Found CVE details for {cve_id}")
+        return cve_data
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching CVE details: {str(e)}")
+        return None
+    finally:
+        if conn:
             conn.close() 
