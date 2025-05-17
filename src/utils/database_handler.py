@@ -1,0 +1,824 @@
+"""
+Database handler module for the VIPER CTI feed application.
+Handles storing and retrieving CVE data using SQLite.
+"""
+import sqlite3
+import logging
+import json
+from datetime import datetime
+from typing import List, Optional, Dict, Any, Union
+from .config import get_db_file_name
+
+# Initialize module logger
+logger = logging.getLogger(__name__)
+
+def initialize_db():
+    """
+    Initializes the database by creating the necessary tables if they don't exist.
+    """
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        # Create the cves table if it doesn't exist
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cve_id TEXT UNIQUE NOT NULL,
+            description TEXT,
+            cvss_v3_score REAL,
+            published_date TEXT,
+            gemini_priority TEXT,
+            gemini_raw_response TEXT,
+            processed_at TEXT,
+            epss_score REAL,
+            epss_percentile REAL,
+            risk_score REAL,
+            alerts TEXT,
+            is_in_kev INTEGER DEFAULT 0,
+            kev_date_added TEXT,
+            msrc_id TEXT,
+            microsoft_product_family TEXT,
+            microsoft_product_name TEXT,
+            microsoft_severity TEXT,
+            patch_tuesday_date TEXT
+        )
+        ''')
+        
+        # Check if we need to add the risk_score and alerts columns
+        cursor.execute("PRAGMA table_info(cves)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'risk_score' not in columns:
+            logger.info("Adding risk_score column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN risk_score REAL")
+        
+        if 'alerts' not in columns:
+            logger.info("Adding alerts column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN alerts TEXT")
+        
+        # Check if we need to add the KEV columns
+        if 'is_in_kev' not in columns:
+            logger.info("Adding is_in_kev column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN is_in_kev INTEGER DEFAULT 0")
+        
+        if 'kev_date_added' not in columns:
+            logger.info("Adding kev_date_added column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN kev_date_added TEXT")
+        
+        # Check if we need to add the Microsoft-related columns
+        if 'msrc_id' not in columns:
+            logger.info("Adding msrc_id column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN msrc_id TEXT")
+        
+        if 'microsoft_product_family' not in columns:
+            logger.info("Adding microsoft_product_family column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_family TEXT")
+        
+        if 'microsoft_product_name' not in columns:
+            logger.info("Adding microsoft_product_name column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_name TEXT")
+        
+        if 'microsoft_severity' not in columns:
+            logger.info("Adding microsoft_severity column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_severity TEXT")
+        
+        if 'patch_tuesday_date' not in columns:
+            logger.info("Adding patch_tuesday_date column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN patch_tuesday_date TEXT")
+        
+        conn.commit()
+        logger.info("Database initialized successfully")
+    except sqlite3.Error as e:
+        logger.error(f"Database initialization error: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+def store_cves(cve_list):
+    """
+    Stores a list of CVEs in the database, skipping duplicates.
+    
+    Args:
+        cve_list (list): A list of dictionaries containing CVE data.
+        
+    Returns:
+        int: Number of CVEs successfully stored.
+    """
+    if not cve_list:
+        logger.warning("No CVEs provided to store")
+        return 0
+    
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        inserted_count = 0
+        for cve in cve_list:
+            try:
+                cursor.execute('''
+                INSERT OR IGNORE INTO cves (cve_id, description, cvss_v3_score, published_date)
+                VALUES (?, ?, ?, ?)
+                ''', (
+                    cve.get('cve_id'),
+                    cve.get('description'),
+                    cve.get('cvss_v3_score'),
+                    cve.get('published_date')
+                ))
+                
+                if cursor.rowcount > 0:
+                    inserted_count += 1
+            except sqlite3.Error as e:
+                logger.error(f"Error storing CVE {cve.get('cve_id')}: {str(e)}")
+        
+        conn.commit()
+        logger.info(f"Successfully stored {inserted_count} new CVEs")
+        return inserted_count
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while storing CVEs: {str(e)}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def get_unprocessed_cves():
+    """
+    Fetches CVEs that have not been processed by Gemini.
+    
+    Returns:
+        list: A list of dictionaries containing unprocessed CVE data.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row  # This enables column access by name
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT id, cve_id, description, cvss_v3_score, published_date, epss_score, epss_percentile, 
+               is_in_kev, kev_date_added, microsoft_severity, microsoft_product_family,
+               microsoft_product_name, patch_tuesday_date
+        FROM cves
+        WHERE gemini_priority IS NULL
+        ''')
+        
+        rows = cursor.fetchall()
+        unprocessed_cves = []
+        for row in rows:
+            unprocessed_cves.append({
+                'id': row['id'],
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date'],
+                'epss_score': row['epss_score'],
+                'epss_percentile': row['epss_percentile'],
+                'is_in_kev': bool(row['is_in_kev']),
+                'kev_date_added': row['kev_date_added'],
+                'microsoft_severity': row['microsoft_severity'],
+                'microsoft_product_family': row['microsoft_product_family'],
+                'microsoft_product_name': row['microsoft_product_name'],
+                'patch_tuesday_date': row['patch_tuesday_date']
+            })
+        
+        logger.info(f"Found {len(unprocessed_cves)} unprocessed CVEs")
+        return unprocessed_cves
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching unprocessed CVEs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_cves_missing_epss():
+    """
+    Fetches CVEs that are missing EPSS score data.
+    
+    Returns:
+        list: A list of dictionaries containing CVE data without EPSS scores.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row  # This enables column access by name
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT id, cve_id, description, cvss_v3_score, published_date
+        FROM cves
+        WHERE epss_score IS NULL
+        ''')
+        
+        rows = cursor.fetchall()
+        missing_epss_cves = []
+        for row in rows:
+            missing_epss_cves.append({
+                'id': row['id'],
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date']
+            })
+        
+        logger.info(f"Found {len(missing_epss_cves)} CVEs missing EPSS data")
+        return missing_epss_cves
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching CVEs missing EPSS data: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_cve_priority(cve_id, priority, raw_response=None):
+    """
+    Updates a CVE's priority as determined by Gemini.
+    
+    Args:
+        cve_id (str): The CVE ID to update.
+        priority (str): The priority assigned by Gemini (HIGH, MEDIUM, LOW, or ERROR_ANALYZING).
+        raw_response (str, optional): The raw response from Gemini.
+        
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        current_time = datetime.utcnow().isoformat()
+        
+        cursor.execute('''
+        UPDATE cves
+        SET gemini_priority = ?, gemini_raw_response = ?, processed_at = ?
+        WHERE cve_id = ?
+        ''', (priority, raw_response, current_time, cve_id))
+        
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"Updated CVE {cve_id} with priority: {priority}")
+            return True
+        else:
+            logger.warning(f"No CVE found with ID {cve_id}")
+            return False
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating CVE priority: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def update_cve_epss_data(cve_id, epss_score, epss_percentile):
+    """
+    Updates a CVE's EPSS score and percentile.
+    
+    Args:
+        cve_id (str): The CVE ID to update.
+        epss_score (float): The EPSS score (probability of exploitation).
+        epss_percentile (float): The EPSS percentile.
+        
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        UPDATE cves
+        SET epss_score = ?, epss_percentile = ?
+        WHERE cve_id = ?
+        ''', (epss_score, epss_percentile, cve_id))
+        
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"Updated CVE {cve_id} with EPSS score: {epss_score:.4f}, percentile: {epss_percentile:.4f}")
+            return True
+        else:
+            logger.warning(f"No CVE found with ID {cve_id} for EPSS update")
+            return False
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating CVE EPSS data: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_high_medium_priority_cves():
+    """
+    Fetches CVEs with HIGH or MEDIUM priority as determined by Gemini.
+    
+    Returns:
+        list: A list of dictionaries containing high and medium priority CVE data.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, processed_at, 
+               epss_score, epss_percentile, is_in_kev, kev_date_added, risk_score
+        FROM cves
+        WHERE gemini_priority IN ('HIGH', 'MEDIUM')
+        ORDER BY 
+            CASE 
+                WHEN gemini_priority = 'HIGH' THEN 1
+                WHEN gemini_priority = 'MEDIUM' THEN 2
+                ELSE 3
+            END,
+            is_in_kev DESC,
+            epss_score DESC NULLS LAST,
+            cvss_v3_score DESC
+        ''')
+        
+        rows = cursor.fetchall()
+        priority_cves = []
+        for row in rows:
+            priority_cves.append({
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date'],
+                'gemini_priority': row['gemini_priority'],
+                'processed_at': row['processed_at'],
+                'epss_score': row['epss_score'],
+                'epss_percentile': row['epss_percentile'],
+                'is_in_kev': bool(row['is_in_kev']),
+                'kev_date_added': row['kev_date_added'],
+                'risk_score': row['risk_score']
+            })
+        
+        logger.info(f"Found {len(priority_cves)} HIGH/MEDIUM priority CVEs")
+        return priority_cves
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching priority CVEs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_cve_risk_data(cve_id, risk_score, alerts):
+    """
+    Updates a CVE's risk score and alerts.
+    
+    Args:
+        cve_id (str): The CVE ID to update.
+        risk_score (float): The calculated risk score (0-1).
+        alerts (list): List of alert messages.
+        
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        # Convert alerts list to JSON string
+        alerts_json = json.dumps(alerts) if alerts else None
+        
+        cursor.execute('''
+        UPDATE cves
+        SET risk_score = ?, alerts = ?
+        WHERE cve_id = ?
+        ''', (risk_score, alerts_json, cve_id))
+        
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"Updated CVE {cve_id} with risk score: {risk_score:.4f}, alerts: {len(alerts) if alerts else 0}")
+            return True
+        else:
+            logger.warning(f"No CVE found with ID {cve_id} for risk data update")
+            return False
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating CVE risk data: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_cves_with_alerts():
+    """
+    Fetches CVEs that have alerts.
+    
+    Returns:
+        list: A list of dictionaries containing CVE data with alerts.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
+               epss_score, epss_percentile, risk_score, alerts, is_in_kev, kev_date_added
+        FROM cves
+        WHERE alerts IS NOT NULL
+        ORDER BY risk_score DESC
+        ''')
+        
+        rows = cursor.fetchall()
+        cves_with_alerts = []
+        for row in rows:
+            # Parse the JSON alerts
+            alerts_json = row['alerts']
+            if alerts_json:
+                try:
+                    alerts = json.loads(alerts_json)
+                except json.JSONDecodeError:
+                    alerts = []
+            else:
+                alerts = []
+                
+            cves_with_alerts.append({
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date'],
+                'gemini_priority': row['gemini_priority'],
+                'epss_score': row['epss_score'],
+                'epss_percentile': row['epss_percentile'],
+                'risk_score': row['risk_score'],
+                'alerts': alerts,
+                'is_in_kev': bool(row['is_in_kev']),
+                'kev_date_added': row['kev_date_added']
+            })
+        
+        logger.info(f"Found {len(cves_with_alerts)} CVEs with alerts")
+        return cves_with_alerts
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching CVEs with alerts: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_cve_kev_status(cve_id: str, is_in_kev: bool, kev_date_added: Optional[str] = None) -> bool:
+    """
+    Updates a CVE's CISA KEV status.
+    
+    Args:
+        cve_id (str): The CVE ID to update.
+        is_in_kev (bool): Whether the CVE is in the CISA KEV catalog.
+        kev_date_added (str, optional): The date the CVE was added to the KEV catalog.
+        
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        # Convert boolean to integer for SQLite
+        is_in_kev_int = 1 if is_in_kev else 0
+        
+        cursor.execute('''
+        UPDATE cves
+        SET is_in_kev = ?, kev_date_added = ?
+        WHERE cve_id = ?
+        ''', (is_in_kev_int, kev_date_added, cve_id))
+        
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"Updated CVE {cve_id} with KEV status: {is_in_kev}, date added: {kev_date_added}")
+            return True
+        else:
+            logger.warning(f"No CVE found with ID {cve_id} for KEV status update")
+            return False
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating CVE KEV status: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_cve_ids_from_db() -> List[str]:
+    """
+    Fetches all unique CVE IDs from the database.
+    
+    Returns:
+        List[str]: A list of all CVE IDs in the database.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT cve_id FROM cves')
+        
+        # Extract the first element of each row (the CVE ID)
+        cve_ids = [row[0] for row in cursor.fetchall()]
+        
+        logger.info(f"Found {len(cve_ids)} unique CVE IDs in the database")
+        return cve_ids
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching all CVE IDs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_cves_with_details() -> List[Dict[str, Any]]:
+    """
+    Fetches all CVEs with their complete details for the dashboard.
+    
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing all CVE data.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
+               processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
+               risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
+               microsoft_severity, patch_tuesday_date
+        FROM cves
+        WHERE gemini_priority IS NOT NULL
+        ORDER BY 
+            CASE 
+                WHEN gemini_priority = 'HIGH' THEN 1
+                WHEN gemini_priority = 'MEDIUM' THEN 2
+                ELSE 3
+            END,
+            risk_score DESC NULLS LAST,
+            is_in_kev DESC,
+            epss_score DESC NULLS LAST,
+            cvss_v3_score DESC
+        ''')
+        
+        rows = cursor.fetchall()
+        all_cves = []
+        for row in rows:
+            # Parse the JSON alerts
+            alerts_json = row['alerts']
+            if alerts_json:
+                try:
+                    alerts = json.loads(alerts_json)
+                except json.JSONDecodeError:
+                    alerts = []
+            else:
+                alerts = []
+                
+            all_cves.append({
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date'],
+                'gemini_priority': row['gemini_priority'],
+                'processed_at': row['processed_at'],
+                'epss_score': row['epss_score'],
+                'epss_percentile': row['epss_percentile'],
+                'is_in_kev': bool(row['is_in_kev']),
+                'kev_date_added': row['kev_date_added'],
+                'risk_score': row['risk_score'],
+                'alerts': alerts,
+                'msrc_id': row['msrc_id'],
+                'microsoft_product_family': row['microsoft_product_family'],
+                'microsoft_product_name': row['microsoft_product_name'],
+                'microsoft_severity': row['microsoft_severity'],
+                'patch_tuesday_date': row['patch_tuesday_date']
+            })
+        
+        logger.info(f"Fetched {len(all_cves)} CVEs with details for dashboard")
+        return all_cves
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching CVEs with details: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_filtered_cves(
+    date_start: Optional[str] = None,
+    date_end: Optional[str] = None,
+    priorities: Optional[List[str]] = None,
+    cvss_min: Optional[float] = None,
+    cvss_max: Optional[float] = None,
+    epss_min: Optional[float] = None,
+    epss_max: Optional[float] = None,
+    is_in_kev: Optional[bool] = None,
+    keyword: Optional[str] = None,
+    microsoft_severity: Optional[str] = None,
+    microsoft_product: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Fetches CVEs with filtering options applied at the database level.
+    
+    Args:
+        date_start (str, optional): Start date for published_date filter (ISO format).
+        date_end (str, optional): End date for published_date filter (ISO format).
+        priorities (List[str], optional): List of Gemini priorities to include (HIGH, MEDIUM, LOW).
+        cvss_min (float, optional): Minimum CVSS score.
+        cvss_max (float, optional): Maximum CVSS score.
+        epss_min (float, optional): Minimum EPSS score.
+        epss_max (float, optional): Maximum EPSS score.
+        is_in_kev (bool, optional): Filter for CVEs in the CISA KEV catalog.
+        keyword (str, optional): Keyword to search in the description.
+        microsoft_severity (str, optional): Filter by Microsoft severity rating.
+        microsoft_product (str, optional): Filter by Microsoft product family.
+        
+    Returns:
+        List[Dict[str, Any]]: Filtered list of CVE dictionaries.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Build the SQL query with filter conditions
+        query = '''
+        SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
+               processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
+               risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
+               microsoft_severity, patch_tuesday_date
+        FROM cves
+        WHERE 1=1
+        '''
+        params = []
+        
+        # Apply filters
+        if priorities:
+            placeholders = ', '.join(['?' for _ in priorities])
+            query += f" AND gemini_priority IN ({placeholders})"
+            params.extend(priorities)
+        else:
+            query += " AND gemini_priority IS NOT NULL"
+        
+        if date_start:
+            query += " AND published_date >= ?"
+            params.append(date_start)
+        
+        if date_end:
+            query += " AND published_date <= ?"
+            params.append(date_end)
+        
+        if cvss_min is not None:
+            query += " AND (cvss_v3_score >= ? OR cvss_v3_score IS NULL)"
+            params.append(cvss_min)
+        
+        if cvss_max is not None:
+            query += " AND (cvss_v3_score <= ? OR cvss_v3_score IS NULL)"
+            params.append(cvss_max)
+        
+        if epss_min is not None:
+            query += " AND (epss_score >= ? OR epss_score IS NULL)"
+            params.append(epss_min)
+        
+        if epss_max is not None:
+            query += " AND (epss_score <= ? OR epss_score IS NULL)"
+            params.append(epss_max)
+        
+        if is_in_kev is not None:
+            query += " AND is_in_kev = ?"
+            params.append(1 if is_in_kev else 0)
+        
+        if keyword:
+            query += " AND description LIKE ?"
+            params.append(f"%{keyword}%")
+        
+        # Microsoft-specific filters
+        if microsoft_severity:
+            query += " AND microsoft_severity = ?"
+            params.append(microsoft_severity)
+        
+        if microsoft_product:
+            query += " AND microsoft_product_family LIKE ?"
+            params.append(f"%{microsoft_product}%")
+        
+        # Add ordering
+        query += '''
+        ORDER BY 
+            CASE 
+                WHEN gemini_priority = 'HIGH' THEN 1
+                WHEN gemini_priority = 'MEDIUM' THEN 2
+                ELSE 3
+            END,
+            risk_score DESC NULLS LAST,
+            is_in_kev DESC,
+            epss_score DESC NULLS LAST,
+            cvss_v3_score DESC
+        '''
+        
+        cursor.execute(query, params)
+        
+        rows = cursor.fetchall()
+        filtered_cves = []
+        for row in rows:
+            # Parse the JSON alerts
+            alerts_json = row['alerts']
+            if alerts_json:
+                try:
+                    alerts = json.loads(alerts_json)
+                except json.JSONDecodeError:
+                    alerts = []
+            else:
+                alerts = []
+                
+            filtered_cves.append({
+                'cve_id': row['cve_id'],
+                'description': row['description'],
+                'cvss_v3_score': row['cvss_v3_score'],
+                'published_date': row['published_date'],
+                'gemini_priority': row['gemini_priority'],
+                'processed_at': row['processed_at'],
+                'epss_score': row['epss_score'],
+                'epss_percentile': row['epss_percentile'],
+                'is_in_kev': bool(row['is_in_kev']),
+                'kev_date_added': row['kev_date_added'],
+                'risk_score': row['risk_score'],
+                'alerts': alerts,
+                'msrc_id': row['msrc_id'],
+                'microsoft_product_family': row['microsoft_product_family'],
+                'microsoft_product_name': row['microsoft_product_name'],
+                'microsoft_severity': row['microsoft_severity'],
+                'patch_tuesday_date': row['patch_tuesday_date']
+            })
+        
+        logger.info(f"Fetched {len(filtered_cves)} CVEs with applied filters")
+        return filtered_cves
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching filtered CVEs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_cve_microsoft_data(
+    cve_id: str,
+    msrc_id: Optional[str] = None,
+    product_family: Optional[str] = None,
+    product_name: Optional[str] = None,
+    severity: Optional[str] = None,
+    pt_date: Optional[str] = None
+) -> bool:
+    """
+    Updates a CVE with Microsoft-specific data.
+    
+    Args:
+        cve_id (str): The CVE ID to update.
+        msrc_id (str, optional): Microsoft Security Response Center document ID.
+        product_family (str, optional): Microsoft product family affected.
+        product_name (str, optional): Specific Microsoft product affected.
+        severity (str, optional): Microsoft severity rating.
+        pt_date (str, optional): Patch Tuesday date (ISO format).
+        
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        UPDATE cves
+        SET msrc_id = ?,
+            microsoft_product_family = ?,
+            microsoft_product_name = ?,
+            microsoft_severity = ?,
+            patch_tuesday_date = ?
+        WHERE cve_id = ?
+        ''', (msrc_id, product_family, product_name, severity, pt_date, cve_id))
+        
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"Updated CVE {cve_id} with Microsoft data (severity: {severity}, product: {product_family})")
+            return True
+        else:
+            logger.warning(f"No CVE found with ID {cve_id} for Microsoft data update")
+            return False
+    
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating CVE Microsoft data: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close() 
