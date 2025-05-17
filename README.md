@@ -74,8 +74,7 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/viper.git](https://github.com/YOUR_USERNAME/viper.git) 
-    # Replace YOUR_USERNAME with your actual GitHub username
+    git clone git@github.com:ozanunal0/viper.git
     cd viper
     ```
 
