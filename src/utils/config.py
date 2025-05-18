@@ -207,8 +207,11 @@ def get_db_file_name():
     # Use project root as fallback
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     abs_path = os.path.join(root_dir, db_file)
+    abs_return_path = os.path.abspath(db_path) # db_path fonksiyon içinde hesaplanan yoldur
+    logger.info(f"[CONFIG_GET_DB_PATH] Returning DB path: {abs_return_path}")
     logger.info(f"Using database file in project root: {abs_path}")
     return abs_path
+    return abs_return_path # Fonksiyonun normalde döndürdüğü yolu döndürün
 
 def get_log_file_name():
     """

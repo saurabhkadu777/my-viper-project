@@ -11,9 +11,16 @@ import os
 import traceback  # Add for better error logging
 import uuid  # For unique identifiers
 import sqlite3  # Added for database connection check
+import logging
+import sys # sys.stderr için eklendi
+from datetime import datetime # datetime için eklendi
+page_logger = logging.getLogger(__name__) 
+
 
 # Add the project root directory to the path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+
+
 
 from src.utils.database_handler import (
     get_cve_details, 
@@ -43,8 +50,14 @@ if 'saved_cve_data' not in st.session_state:
 if 'operation_id' not in st.session_state:
     st.session_state.operation_id = str(uuid.uuid4())
 
-# Set the page title
-st.title("🔎 Live CVE Lookup")
+# Set the page title and add refresh button at the top right
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("🔎 Live CVE Lookup")
+with refresh_col:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)  # Adding some vertical space
+    if st.button("🔄 Refresh", type="primary", use_container_width=True):
+        st.rerun()
 
 # Sidebar with information about the tool
 st.sidebar.header("About this Tool")
@@ -65,12 +78,6 @@ st.markdown("### Enter a CVE ID to lookup")
 with st.form(key="cve_lookup_form"):
     cve_id = st.text_input("CVE ID", placeholder="e.g. CVE-2023-12345")
     lookup_button = st.form_submit_button("Look up CVE", type="primary")
-
-# Add refresh button at the top right
-col1, col2 = st.columns([5, 1])
-with col2:
-    if st.button("🔄 Refresh"):
-        st.rerun()
 
 # Function to validate CVE ID format
 def is_valid_cve_id(cve_id: str) -> bool:
@@ -97,7 +104,7 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
         st.markdown(f"**Last analyzed:** {cve_data.get('processed_at')}")
     
     # Display badges for priority, KEV status, etc.
-    badges_html = '<div style="display: flex; gap: 10px; margin-bottom: 15px;">'
+    badges_html = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">'
     
     # Priority badge
     priority = cve_data.get('gemini_priority')
@@ -109,19 +116,11 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
             'ERROR_ANALYZING': 'gray'
         }
         priority_color = priority_colors.get(priority, 'gray')
-        badges_html += f'''
-        <span style="background-color: {priority_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">
-            {priority} Priority
-        </span>
-        '''
+        badges_html += f'<span style="background-color: {priority_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">{priority} Priority</span>'
     
     # KEV status badge
     if cve_data.get('is_in_kev'):
-        badges_html += f'''
-        <span style="background-color: #d9534f; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">
-            CISA KEV
-        </span>
-        '''
+        badges_html += '<span style="background-color: #d9534f; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">CISA KEV</span>'
         
     # Microsoft severity badge if available
     ms_severity = cve_data.get('microsoft_severity')
@@ -133,11 +132,7 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
             'Low': 'green'
         }.get(ms_severity, 'gray')
         
-        badges_html += f'''
-        <span style="background-color: {severity_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">
-            MS {ms_severity}
-        </span>
-        '''
+        badges_html += f'<span style="background-color: {severity_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">MS {ms_severity}</span>'
     
     badges_html += '</div>'
     st.markdown(badges_html, unsafe_allow_html=True)
@@ -167,14 +162,15 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
         ms_specific = cve_data.get('microsoft_product_name', 'Unknown')
         patch_date = cve_data.get('patch_tuesday_date')
         
-        st.markdown(f"""
+        ms_info_html = f"""
         <div style="background-color: rgba(0,0,0,0.05); padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid {severity_color};">
             <span style="font-weight: bold; color: {severity_color};">Microsoft {ms_severity}</span><br>
             <b>Product Family:</b> {ms_product}<br>
             <b>Specific Product:</b> {ms_specific}<br>
             <b>Patch Tuesday:</b> {patch_date if patch_date else 'Unknown'}
         </div>
-        """, unsafe_allow_html=True)
+        """
+        st.markdown(ms_info_html, unsafe_allow_html=True)
     
     # Metrics section
     st.markdown("### Risk Metrics")
@@ -404,7 +400,9 @@ if lookup_button and cve_id:
                             }
                             priority_color = priority_colors.get(priority, 'gray')
                             
-                            st.markdown(f'<div style="background-color: {priority_color}; color: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;">Gemini Priority: {priority}</div>', unsafe_allow_html=True)
+                            # Simplify HTML to avoid rendering issues
+                            priority_html = f'<div style="background-color: {priority_color}; color: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;">Gemini Priority: {priority}</div>'
+                            st.markdown(priority_html, unsafe_allow_html=True)
                         except Exception as e:
                             st.error(f"Error analyzing with Gemini: {str(e)}")
                             nvd_data['gemini_priority'] = "ERROR_ANALYZING"
@@ -431,10 +429,14 @@ if lookup_button and cve_id:
                     with save_col1:
                         if st.button("💾 Save to Database", type="primary"):
                             log_debug(f"Save button clicked for CVE {cve_id}")
+                            log_debug(f"[LIVE_LOOKUP] Data to be saved for {cve_id}: {nvd_data}")
                             
                             with st.spinner("Saving to database..."):
                                 save_result = save_cve_to_database(nvd_data)
-                                
+                                log_debug(f"[LIVE_LOOKUP] save_cve_to_database returned: {save_result} for {cve_id}") # YENİ LOG
+                                log_debug(f"[LIVE_LOOKUP] Session state after save attempt: save_attempted={st.session_state.save_attempted}, save_success={st.session_state.save_success}") # YENİ LOG
+
+
                                 if save_result:
                                     st.success("✅ CVE successfully saved to database!", icon="✅")
                                     log_debug("CVE successfully saved to database")

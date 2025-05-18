@@ -15,8 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from src.utils.database_handler import get_all_cves_with_details, get_filtered_cves
 
-# Set the page title
-st.title("🔍 Detailed Vulnerability Analysis")
+# Set the page title and add refresh button at the top right
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("🔍 Detailed Vulnerability Analysis")
+with refresh_col:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)  # Adding some vertical space
+    if st.button("🔄 Refresh", type="primary", use_container_width=True):
+        st.rerun()
 
 # Sidebar for filtering
 st.sidebar.header("Find Vulnerability")
@@ -84,10 +90,12 @@ df = pd.DataFrame(st.session_state.detailed_cve_data)
 
 # Convert date strings to datetime with error handling
 if 'published_date' in df.columns:
-    # Use 'coerce' errors to handle various date formats
-    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
+    # Use utc=True to handle mixed timezones properly
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', utc=True)
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', utc=True)
+if 'patch_tuesday_date' in df.columns:
+    df['patch_tuesday_date'] = pd.to_datetime(df['patch_tuesday_date'], errors='coerce', utc=True)
 
 # Get a list of CVE IDs for selection
 cve_list = df['cve_id'].tolist()
@@ -120,20 +128,15 @@ with col1:
     priority = selected_data.get('gemini_priority', 'UNKNOWN')
     priority_color = priority_colors.get(priority, 'gray')
     
-    # Format badges
-    badges_html = f'''
-    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-        <span style="background-color: {priority_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">
-            {priority} Priority
-        </span>
-    '''
+    # Format badges - use simplified HTML format to avoid rendering issues
+    badges_html = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">'
     
+    # Priority badge
+    badges_html += f'<span style="background-color: {priority_color}; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">{priority} Priority</span>'
+    
+    # Add KEV badge if applicable
     if selected_data.get('is_in_kev'):
-        badges_html += f'''
-        <span style="background-color: #d9534f; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">
-            CISA KEV
-        </span>
-        '''
+        badges_html += '<span style="background-color: #d9534f; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">CISA KEV</span>'
     
     badges_html += "</div>"
     st.markdown(badges_html, unsafe_allow_html=True)
@@ -161,14 +164,14 @@ with col1:
             'Low': 'green'
         }.get(ms_severity, 'gray')
         
-        st.markdown(f"""
-        <div style="background-color: rgba(0,0,0,0.05); padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid {severity_color};">
-            <span style="font-weight: bold; color: {severity_color};">Microsoft {ms_severity}</span><br>
-            <b>Product Family:</b> {ms_product}<br>
-            <b>Specific Product:</b> {ms_specific}<br>
-            <b>Patch Tuesday:</b> {patch_date.strftime('%Y-%m-%d') if pd.notnull(patch_date) else 'Unknown'}
-        </div>
-        """, unsafe_allow_html=True)
+        # Use simplified HTML format to avoid rendering issues
+        ms_info_html = f"""<div style="background-color: rgba(0,0,0,0.05); padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid {severity_color};">
+<span style="font-weight: bold; color: {severity_color};">Microsoft {ms_severity}</span><br>
+<b>Product Family:</b> {ms_product}<br>
+<b>Specific Product:</b> {ms_specific}<br>
+<b>Patch Tuesday:</b> {patch_date.strftime('%Y-%m-%d') if pd.notnull(patch_date) else 'Unknown'}
+</div>"""
+        st.markdown(ms_info_html, unsafe_allow_html=True)
 
 with col2:
     st.markdown("### Description")

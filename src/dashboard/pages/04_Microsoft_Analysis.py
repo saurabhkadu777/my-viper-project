@@ -15,8 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from src.utils.database_handler import get_filtered_cves, get_all_cves_with_details
 
-# Set the page title
-st.title("🪟 Microsoft Patch Tuesday Analysis")
+# Set the page title and add refresh button at the top right
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("🪟 Microsoft Vulnerability Analysis")
+with refresh_col:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)  # Adding some vertical space
+    if st.button("🔄 Refresh", type="primary", use_container_width=True):
+        st.rerun()
 
 # Load all CVEs with details
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -43,11 +49,11 @@ if not microsoft_cves:
 # Convert to DataFrame
 df = pd.DataFrame(microsoft_cves)
 
-# Convert date strings to datetime
+# Convert date strings to datetime with error handling
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', utc=True)
 if 'patch_tuesday_date' in df.columns:
-    df['patch_tuesday_date'] = pd.to_datetime(df['patch_tuesday_date'], errors='coerce', format='mixed')
+    df['patch_tuesday_date'] = pd.to_datetime(df['patch_tuesday_date'], errors='coerce', utc=True)
 
 # Sidebar filters
 st.sidebar.header("Microsoft Filters")
@@ -87,8 +93,17 @@ if 'patch_tuesday_date' in df.columns:
     
     if len(date_range) == 2:
         start_date, end_date = date_range
-        df = df[(df['patch_tuesday_date'].dt.date >= start_date) & 
-                (df['patch_tuesday_date'].dt.date <= end_date)]
+        if start_date and end_date:
+            # First drop rows with NaN patch_tuesday_date to avoid the .dt accessor error
+            df_valid_dates = df.dropna(subset=['patch_tuesday_date'])
+            
+            # Apply the date filter only on valid dates
+            if not df_valid_dates.empty:
+                df = df_valid_dates[(df_valid_dates['patch_tuesday_date'].dt.date >= start_date) &
+                                    (df_valid_dates['patch_tuesday_date'].dt.date <= end_date)]
+            else:
+                st.warning("No valid patch Tuesday dates found. Cannot apply date filter.")
+                df = pd.DataFrame()  # Empty dataframe if no valid dates
 
 # Apply severity filter
 if severity_filter:
@@ -272,9 +287,13 @@ st.subheader("Microsoft Vulnerability Table")
 # Format the dataframe for display
 display_df = df.copy()
 if 'published_date' in display_df.columns:
-    display_df['published_date'] = display_df['published_date'].dt.strftime('%Y-%m-%d')
+    display_df['published_date'] = display_df['published_date'].apply(
+        lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+    )
 if 'patch_tuesday_date' in display_df.columns:
-    display_df['patch_tuesday_date'] = display_df['patch_tuesday_date'].dt.strftime('%Y-%m-%d')
+    display_df['patch_tuesday_date'] = display_df['patch_tuesday_date'].apply(
+        lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+    )
 
 # Format floating point numbers
 if 'cvss_v3_score' in display_df.columns:
@@ -328,4 +347,43 @@ st.download_button(
 
 # Add footer with timestamp
 st.markdown("---")
-st.markdown(f"*Microsoft Patch Tuesday analysis generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*") 
+st.markdown(f"*Microsoft Patch Tuesday analysis generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+
+# For the time-based analysis
+if not df.empty and 'patch_tuesday_date' in df.columns:
+    # Use only valid dates for this analysis
+    df_dates = df.dropna(subset=['patch_tuesday_date'])
+    
+    if not df_dates.empty:
+        # Group by month
+        df_dates['month'] = df_dates['patch_tuesday_date'].dt.to_period('M')
+        severity_by_month = df_dates.groupby(['month', 'microsoft_severity']).size().reset_index(name='count')
+        severity_by_month['month_start'] = severity_by_month['month'].dt.to_timestamp()
+        
+        # Create a time series plot
+        fig3 = px.line(
+            severity_by_month, 
+            x='month_start', 
+            y='count', 
+            color='microsoft_severity',
+            markers=True,
+            color_discrete_map={
+                'Critical': '#d9534f',
+                'Important': '#f0ad4e',
+                'Moderate': '#5bc0de',
+                'Low': '#5cb85c'
+            }
+        )
+        
+        fig3.update_layout(
+            title="Microsoft Vulnerabilities by Month and Severity",
+            xaxis_title="Month",
+            yaxis_title="Number of Vulnerabilities",
+            legend_title="Severity"
+        )
+        
+        st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.info("No valid patch Tuesday dates available for time-based analysis.")
+else:
+    st.info("No Microsoft patch data available for time-based analysis.") 

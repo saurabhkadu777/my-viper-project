@@ -16,8 +16,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from src.utils.database_handler import get_all_cves_with_details
 
-# Set the page title
-st.title("📈 Analytics & Trends")
+# Set the page title and add refresh button at the top right
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("📈 Analytics & Trends")
+with refresh_col:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)  # Adding some vertical space
+    if st.button("🔄 Refresh", type="primary", use_container_width=True):
+        st.rerun()
 
 # Load all CVEs with details
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -38,11 +44,11 @@ df = pd.DataFrame(all_cve_data)
 
 # Convert date strings to datetime
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', utc=True)
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', utc=True)
 if 'processed_at' in df.columns:
-    df['processed_at'] = pd.to_datetime(df['processed_at'], errors='coerce', format='mixed')
+    df['processed_at'] = pd.to_datetime(df['processed_at'], errors='coerce', utc=True)
 
 # Add time range selection
 st.sidebar.header("Time Range")
@@ -61,8 +67,8 @@ date_range = st.sidebar.date_input(
 # Apply date filter if both dates are selected
 if len(date_range) == 2:
     start_date, end_date = date_range
-    start_date = pd.to_datetime(start_date, errors='coerce')
-    end_date = pd.to_datetime(end_date, errors='coerce') + timedelta(days=1)  # Include end date
+    start_date = pd.to_datetime(start_date, errors='coerce', utc=True)
+    end_date = pd.to_datetime(end_date, errors='coerce', utc=True) + timedelta(days=1)  # Include end date
     
     df = df[(df['published_date'] >= start_date) & (df['published_date'] < end_date)]
 
@@ -89,8 +95,23 @@ with tab1:
         period_type = "Weekly"
     
     # Create the time series data
-    ts_data = df.groupby(['period']).size().reset_index(name='count')
-    ts_data['period_start'] = ts_data['period'].dt.start_time
+    df_ts = df.copy()
+    # Handle different time periods for the time series
+    if period_type == 'Monthly':
+        # Only perform operations on rows with valid published_date
+        df_ts_valid = df_ts.dropna(subset=['published_date'])
+        if not df_ts_valid.empty:
+            df_ts_valid['period'] = df_ts_valid['published_date'].dt.to_period('M')
+            ts_data = df_ts_valid.groupby('period').size().reset_index(name='count')
+            ts_data['period_start'] = ts_data['period'].dt.start_time
+            
+            # Priority time series
+            priority_ts = df_ts_valid.groupby(['period', 'gemini_priority']).size().reset_index(name='count')
+            priority_ts['period_start'] = priority_ts['period'].dt.start_time
+    else:
+        df_ts['period'] = df_ts['published_date'].dt.to_period('W')
+        ts_data = df_ts.groupby('period').size().reset_index(name='count')
+        ts_data['period_start'] = ts_data['period'].dt.start_time
     
     # Create the time series plot
     fig = px.line(
@@ -310,12 +331,12 @@ with tab3:
     st.plotly_chart(fig_kev, use_container_width=True)
     
     # KEV vulnerabilities over time
-    if 'kev_date_added' in df.columns and df['is_in_kev'].sum() > 0:
-        # Filter to KEV entries
+    if 'kev_date_added' in df.columns:
         kev_df = df[df['is_in_kev'] == True].copy()
+        kev_df = kev_df.dropna(subset=['kev_date_added'])
         
-        # Group by month of addition to KEV
-        if not kev_df['kev_date_added'].isna().all():
+        if not kev_df.empty:
+            # Monthly KEV additions
             kev_df['kev_month'] = kev_df['kev_date_added'].dt.to_period('M')
             kev_monthly = kev_df.groupby('kev_month').size().reset_index(name='count')
             kev_monthly['month_start'] = kev_monthly['kev_month'].dt.start_time
@@ -361,38 +382,42 @@ with tab3:
     st.plotly_chart(fig_kev_priority, use_container_width=True)
     
     # Time to KEV analysis if enough data
-    kev_df = df[df['is_in_kev'] == True].copy()
-    if not kev_df.empty and not kev_df['kev_date_added'].isna().all():
-        kev_df['days_to_kev'] = (kev_df['kev_date_added'] - kev_df['published_date']).dt.days
-        
-        # Filter out negative values and outliers
-        kev_df = kev_df[(kev_df['days_to_kev'] >= 0) & (kev_df['days_to_kev'] <= 365)]
+    if 'kev_date_added' in df.columns and 'published_date' in df.columns:
+        # Need both dates to calculate days to KEV
+        kev_df = df[df['is_in_kev'] == True].copy()
+        kev_df = kev_df.dropna(subset=['kev_date_added', 'published_date'])
         
         if not kev_df.empty:
-            st.subheader("Time from Publication to KEV Addition")
+            kev_df['days_to_kev'] = (kev_df['kev_date_added'] - kev_df['published_date']).dt.days
             
-            # Histogram of days to KEV
-            fig_days_to_kev = px.histogram(
-                kev_df,
-                x='days_to_kev',
-                nbins=20,
-                title="Days from CVE Publication to KEV Catalog Addition",
-                labels={"days_to_kev": "Days"}
-            )
-            fig_days_to_kev.update_layout(
-                yaxis_title="Number of Vulnerabilities",
-                xaxis_title="Days to KEV Addition"
-            )
-            st.plotly_chart(fig_days_to_kev, use_container_width=True)
+            # Filter out negative values and outliers
+            kev_df = kev_df[(kev_df['days_to_kev'] >= 0) & (kev_df['days_to_kev'] <= 365)]
             
-            # Statistics
-            mean_days = kev_df['days_to_kev'].mean()
-            median_days = kev_df['days_to_kev'].median()
-            max_days = kev_df['days_to_kev'].max()
-            
-            st.metric("Average Days to KEV", f"{mean_days:.1f}")
-            st.metric("Median Days to KEV", f"{median_days:.1f}")
-            st.metric("Maximum Days to KEV", f"{max_days:.0f}")
+            if not kev_df.empty:
+                st.subheader("Time from Publication to KEV Addition")
+                
+                # Histogram of days to KEV
+                fig_days_to_kev = px.histogram(
+                    kev_df,
+                    x='days_to_kev',
+                    nbins=20,
+                    title="Days from CVE Publication to KEV Catalog Addition",
+                    labels={"days_to_kev": "Days"}
+                )
+                fig_days_to_kev.update_layout(
+                    yaxis_title="Number of Vulnerabilities",
+                    xaxis_title="Days to KEV Addition"
+                )
+                st.plotly_chart(fig_days_to_kev, use_container_width=True)
+                
+                # Statistics
+                mean_days = kev_df['days_to_kev'].mean()
+                median_days = kev_df['days_to_kev'].median()
+                max_days = kev_df['days_to_kev'].max()
+                
+                st.metric("Average Days to KEV", f"{mean_days:.1f}")
+                st.metric("Median Days to KEV", f"{median_days:.1f}")
+                st.metric("Maximum Days to KEV", f"{max_days:.0f}")
 
 # Risk Distribution Tab
 with tab4:
@@ -467,7 +492,7 @@ with tab5:
     st.subheader("Microsoft Patch Tuesday Analysis")
     
     # Filter only CVEs with Microsoft data
-    ms_df = df.dropna(subset=['microsoft_severity']).copy()
+    ms_df = df.dropna(subset=['patch_tuesday_date', 'microsoft_severity']).copy()
     
     if ms_df.empty:
         st.info("No Microsoft patch data available for the selected time period.")
@@ -531,7 +556,7 @@ with tab5:
         # Group by month and severity
         if 'patch_tuesday_date' in ms_df.columns:
             ms_df['patch_month'] = ms_df['patch_tuesday_date'].dt.to_period('M')
-            severity_by_month = ms_df.groupby(['patch_month', 'microsoft_severity']).size().unstack(fill_value=0).reset_index()
+            severity_by_month = ms_df.groupby(['patch_month', 'microsoft_severity']).size().reset_index(name='count')
             severity_by_month['month_start'] = severity_by_month['patch_month'].dt.start_time
             
             # Create time series chart for severity distribution

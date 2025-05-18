@@ -15,8 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from src.utils.database_handler import get_filtered_cves, get_all_cves_with_details
 
-# Set the page title
-st.title("📊 Vulnerability Dashboard")
+# Set the page title and add refresh button at the top right
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("📊 Vulnerability Dashboard")
+with refresh_col:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)  # Adding some vertical space
+    if st.button("🔄 Refresh", type="primary", use_container_width=True):
+        st.rerun()
 
 # Create sidebar for filters
 st.sidebar.header("Filters")
@@ -131,9 +137,9 @@ df = pd.DataFrame(st.session_state.cve_data)
 
 # Convert date strings to datetime
 if 'published_date' in df.columns:
-    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', format='mixed')
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce', utc=True)
 if 'kev_date_added' in df.columns:
-    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', format='mixed')
+    df['kev_date_added'] = pd.to_datetime(df['kev_date_added'], errors='coerce', utc=True)
 
 # --- Metrics Section ---
 st.subheader("Summary Metrics")
@@ -180,17 +186,23 @@ with priority_cols[0]:
 
 with priority_cols[1]:
     # CVEs Over Time
-    df_by_date = df.groupby(df['published_date'].dt.date).size().reset_index(name='count')
-    df_by_date.columns = ['Date', 'CVEs']
-    
-    fig_timeline = px.line(
-        df_by_date, 
-        x='Date', 
-        y='CVEs',
-        markers=True
-    )
-    fig_timeline.update_layout(height=300)
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    # Filter to only include valid datetime values before grouping
+    df_date_valid = df.dropna(subset=['published_date'])
+    # Handle dt.date access only on valid datetime values
+    if not df_date_valid.empty:
+        df_by_date = df_date_valid.groupby(df_date_valid['published_date'].dt.date).size().reset_index(name='count')
+        df_by_date.columns = ['Date', 'CVEs']
+        
+        fig_timeline = px.line(
+            df_by_date, 
+            x='Date', 
+            y='CVEs',
+            markers=True
+        )
+        fig_timeline.update_layout(height=300)
+        st.plotly_chart(fig_timeline, use_container_width=True)
+    else:
+        st.info("No valid publication dates available for timeline display.")
 
 # --- KEV Distribution ---
 st.subheader("CISA KEV Distribution")
@@ -313,8 +325,15 @@ if not kev_entries.empty and 'kev_date_added' in kev_entries.columns:
         
         # Format for display
         recent_kev_display = recent_kev.copy()
-        recent_kev_display['published_date'] = recent_kev_display['published_date'].dt.strftime('%Y-%m-%d')
-        recent_kev_display['kev_date_added'] = recent_kev_display['kev_date_added'].dt.strftime('%Y-%m-%d')
+        # Safely format dates
+        if 'published_date' in recent_kev_display.columns:
+            recent_kev_display['published_date'] = recent_kev_display['published_date'].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+            )
+        if 'kev_date_added' in recent_kev_display.columns:
+            recent_kev_display['kev_date_added'] = recent_kev_display['kev_date_added'].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+            )
         
         # Only select relevant columns
         recent_kev_display = recent_kev_display[['cve_id', 'kev_date_added', 'gemini_priority', 'cvss_v3_score', 'description']]
@@ -370,9 +389,13 @@ if not ms_critical.empty:
         # Format for display
         ms_critical_display = recent_critical.copy()
         if 'published_date' in ms_critical_display.columns:
-            ms_critical_display['published_date'] = ms_critical_display['published_date'].dt.strftime('%Y-%m-%d')
+            ms_critical_display['published_date'] = ms_critical_display['published_date'].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+            )
         if 'patch_tuesday_date' in ms_critical_display.columns:
-            ms_critical_display['patch_tuesday_date'] = ms_critical_display['patch_tuesday_date'].dt.strftime('%Y-%m-%d')
+            ms_critical_display['patch_tuesday_date'] = ms_critical_display['patch_tuesday_date'].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+            )
         
         # Only select relevant columns
         ms_critical_display = ms_critical_display[['cve_id', 'microsoft_severity', 'microsoft_product_family', 'patch_tuesday_date', 'gemini_priority', 'cvss_v3_score', 'description']]
@@ -419,9 +442,13 @@ if not ms_critical.empty:
 # Format the dataframe for display
 display_df = df.copy()
 if 'published_date' in display_df.columns:
-    display_df['published_date'] = display_df['published_date'].dt.strftime('%Y-%m-%d')
+    display_df['published_date'] = display_df['published_date'].apply(
+        lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+    )
 if 'kev_date_added' in display_df.columns:
-    display_df['kev_date_added'] = display_df['kev_date_added'].dt.strftime('%Y-%m-%d')
+    display_df['kev_date_added'] = display_df['kev_date_added'].apply(
+        lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else 'Unknown'
+    )
 
 # Format floating point numbers
 if 'epss_score' in display_df.columns:
@@ -522,7 +549,7 @@ if selected_cve:
     
     # Determine if this is a KEV vulnerability for styling
     is_kev = selected_data.get('is_in_kev', False)
-    kev_badge = """<span style="background-color: #ff4b4b; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold; margin-left: 10px;">CISA KEV</span>""" if is_kev else ""
+    kev_badge = '<span style="background-color: #ff4b4b; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold; margin-left: 10px;">CISA KEV</span>' if is_kev else ""
     
     # Display CVE header with KEV badge if applicable
     st.markdown(f"### {selected_cve} {kev_badge}", unsafe_allow_html=True)
@@ -537,12 +564,13 @@ if selected_cve:
         
         # Make the KEV status more prominent
         if is_kev:
-            st.markdown("""
+            kev_alert_html = """
             <div style="background-color: rgba(255, 75, 75, 0.1); padding: 10px; border-radius: 5px; border-left: 4px solid #ff4b4b; margin-top: 10px;">
-                <b>⚠️ CISA Known Exploited Vulnerability</b><br>
-                This vulnerability is being actively exploited in the wild
+            <b>⚠️ CISA Known Exploited Vulnerability</b><br>
+            This vulnerability is being actively exploited in the wild
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(kev_alert_html, unsafe_allow_html=True)
             
             if pd.notnull(selected_data.get('kev_date_added')):
                 st.markdown(f"**KEV Added:** {selected_data.get('kev_date_added').strftime('%Y-%m-%d')}")

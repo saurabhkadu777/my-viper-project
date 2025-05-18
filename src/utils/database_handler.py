@@ -6,6 +6,7 @@ import sqlite3
 import logging
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
@@ -13,6 +14,37 @@ from .config import get_db_file_name
 
 # Initialize module logger
 logger = logging.getLogger(__name__)
+
+# Bu modül için özel debug log dosyasının mutlak yolu
+# __file__ .../viper/src/utils/database_handler.py dosyasını işaret eder
+# dirname(__file__) -> .../viper/src/utils
+# dirname(dirname(__file__)) -> .../viper/src
+# dirname(dirname(dirname(__file__))) -> .../viper (Bu proje kök dizinidir)
+PROJECT_ROOT_DH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+LOG_DIR_ABS_DH = os.path.join(PROJECT_ROOT_DH, 'logs')
+DB_HANDLER_LOG_FILE = os.path.join(LOG_DIR_ABS_DH, "database_handler_execution.log") # Ayırt edici bir isim
+
+try:
+    os.makedirs(LOG_DIR_ABS_DH, exist_ok=True) # Log klasörünü oluştur
+    # Modül yüklendiğinde bu dosyaya bir başlangıç kaydı atmayı dene
+    with open(DB_HANDLER_LOG_FILE, "a", encoding="utf-8") as f_init:
+        f_init.write(f"--- DB_HANDLER_MODULE_LOAD_LOG: database_handler.py Streamlit tarafından yüklendi: {datetime.now()} ---\n")
+    # Konsola da bilgi verelim
+    print(f"DB_HANDLER_SETUP: {DB_HANDLER_LOG_FILE} dosyasına ilk log denemesi yapıldı.", file=sys.stderr)
+except Exception as e_init_log:
+    # Bu çok kritik bir hata olur, çünkü hiçbir log yazamayız
+    print(f"CRITICAL_ERROR_DB_HANDLER_SETUP: {DB_HANDLER_LOG_FILE} oluşturulamadı/yazılamadı: {str(e_init_log)}", file=sys.stderr)
+
+def log_to_file_db_handler(message): # Fonksiyon adını netleştirelim
+    # Her zaman önce konsola yazdırmayı dene (Streamlit konsolunda görünür)
+    print(f"Attempting DB_HANDLER_LOG: {message}", file=sys.stderr)
+    try:
+        with open(DB_HANDLER_LOG_FILE, "a", encoding="utf-8") as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{timestamp} - DB_HANDLER_LOG_CONTENT: {message}\n")
+    except Exception as e_log_db:
+        # Bu olursa hiçbir logumuz olmaz, çok kritik
+        print(f"CRITICAL_ERROR_LOG_TO_FILE_DB_HANDLER: {DB_HANDLER_LOG_FILE} dosyasına yazılamadı. Hata: {str(e_log_db)}. Mesaj: {message}", file=sys.stderr)
 
 # Add direct file logging for critical database operations
 def log_to_file(message):
@@ -35,12 +67,12 @@ def initialize_db():
     # Ensure database directory exists
     db_dir = os.path.dirname(db_path)
     if db_dir and not os.path.exists(db_dir):
-        logger.info(f"Creating database directory: {db_dir}")
+        logger.debug(f"Creating database directory: {db_dir}")
         os.makedirs(db_dir, exist_ok=True)
     
     conn = None
     try:
-        logger.info(f"Initializing database at: {db_path}")
+        logger.debug(f"Initializing database at: {db_path}")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -70,49 +102,49 @@ def initialize_db():
         ''')
         
         # Check if we need to add the risk_score and alerts columns
-        cursor.execute("PRAGMA table_info(cves)")
+        cursor.execute("PRAGMA table_debug(cves)")
         columns = [column[1] for column in cursor.fetchall()]
         
         if 'risk_score' not in columns:
-            logger.info("Adding risk_score column to cves table")
+            logger.debug("Adding risk_score column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN risk_score REAL")
         
         if 'alerts' not in columns:
-            logger.info("Adding alerts column to cves table")
+            logger.debug("Adding alerts column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN alerts TEXT")
         
         # Check if we need to add the KEV columns
         if 'is_in_kev' not in columns:
-            logger.info("Adding is_in_kev column to cves table")
+            logger.debug("Adding is_in_kev column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN is_in_kev INTEGER DEFAULT 0")
         
         if 'kev_date_added' not in columns:
-            logger.info("Adding kev_date_added column to cves table")
+            logger.debug("Adding kev_date_added column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN kev_date_added TEXT")
         
         # Check if we need to add the Microsoft-related columns
         if 'msrc_id' not in columns:
-            logger.info("Adding msrc_id column to cves table")
+            logger.debug("Adding msrc_id column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN msrc_id TEXT")
         
         if 'microsoft_product_family' not in columns:
-            logger.info("Adding microsoft_product_family column to cves table")
+            logger.debug("Adding microsoft_product_family column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_family TEXT")
         
         if 'microsoft_product_name' not in columns:
-            logger.info("Adding microsoft_product_name column to cves table")
+            logger.debug("Adding microsoft_product_name column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_name TEXT")
         
         if 'microsoft_severity' not in columns:
-            logger.info("Adding microsoft_severity column to cves table")
+            logger.debug("Adding microsoft_severity column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_severity TEXT")
         
         if 'patch_tuesday_date' not in columns:
-            logger.info("Adding patch_tuesday_date column to cves table")
+            logger.debug("Adding patch_tuesday_date column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN patch_tuesday_date TEXT")
         
         conn.commit()
-        logger.info("Database initialized successfully")
+        logger.debug("Database initialized successfully")
     except sqlite3.Error as e:
         logger.error(f"Database initialization error: {str(e)}")
         logger.error(traceback.format_exc())
@@ -158,7 +190,7 @@ def store_cves(cve_list):
                 logger.error(f"Error storing CVE {cve.get('cve_id')}: {str(e)}")
         
         conn.commit()
-        logger.info(f"Successfully stored {inserted_count} new CVEs")
+        logger.debug(f"Successfully stored {inserted_count} new CVEs")
         return inserted_count
     
     except sqlite3.Error as e:
@@ -208,7 +240,7 @@ def get_unprocessed_cves():
                 'patch_tuesday_date': row['patch_tuesday_date']
             })
         
-        logger.info(f"Found {len(unprocessed_cves)} unprocessed CVEs")
+        logger.debug(f"Found {len(unprocessed_cves)} unprocessed CVEs")
         return unprocessed_cves
     
     except sqlite3.Error as e:
@@ -248,7 +280,7 @@ def get_cves_missing_epss():
                 'published_date': row['published_date']
             })
         
-        logger.info(f"Found {len(missing_epss_cves)} CVEs missing EPSS data")
+        logger.debug(f"Found {len(missing_epss_cves)} CVEs missing EPSS data")
         return missing_epss_cves
     
     except sqlite3.Error as e:
@@ -286,7 +318,7 @@ def update_cve_priority(cve_id, priority, raw_response=None):
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with priority: {priority}")
+            logger.debug(f"Updated CVE {cve_id} with priority: {priority}")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id}")
@@ -325,7 +357,7 @@ def update_cve_epss_data(cve_id, epss_score, epss_percentile):
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with EPSS score: {epss_score:.4f}, percentile: {epss_percentile:.4f}")
+            logger.debug(f"Updated CVE {cve_id} with EPSS score: {epss_score:.4f}, percentile: {epss_percentile:.4f}")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id} for EPSS update")
@@ -384,7 +416,7 @@ def get_high_medium_priority_cves():
                 'risk_score': row['risk_score']
             })
         
-        logger.info(f"Found {len(priority_cves)} HIGH/MEDIUM priority CVEs")
+        logger.debug(f"Found {len(priority_cves)} HIGH/MEDIUM priority CVEs")
         return priority_cves
     
     except sqlite3.Error as e:
@@ -423,7 +455,7 @@ def update_cve_risk_data(cve_id, risk_score, alerts):
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with risk score: {risk_score:.4f}, alerts: {len(alerts) if alerts else 0}")
+            logger.debug(f"Updated CVE {cve_id} with risk score: {risk_score:.4f}, alerts: {len(alerts) if alerts else 0}")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id} for risk data update")
@@ -484,7 +516,7 @@ def get_cves_with_alerts():
                 'kev_date_added': row['kev_date_added']
             })
         
-        logger.info(f"Found {len(cves_with_alerts)} CVEs with alerts")
+        logger.debug(f"Found {len(cves_with_alerts)} CVEs with alerts")
         return cves_with_alerts
     
     except sqlite3.Error as e:
@@ -523,7 +555,7 @@ def update_cve_kev_status(cve_id: str, is_in_kev: bool, kev_date_added: Optional
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with KEV status: {is_in_kev}, date added: {kev_date_added}")
+            logger.debug(f"Updated CVE {cve_id} with KEV status: {is_in_kev}, date added: {kev_date_added}")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id} for KEV status update")
@@ -553,7 +585,7 @@ def get_all_cve_ids_from_db() -> List[str]:
         # Extract the first element of each row (the CVE ID)
         cve_ids = [row[0] for row in cursor.fetchall()]
         
-        logger.info(f"Found {len(cve_ids)} unique CVE IDs in the database")
+        logger.debug(f"Found {len(cve_ids)} unique CVE IDs in the database")
         return cve_ids
     
     except sqlite3.Error as e:
@@ -628,7 +660,7 @@ def get_all_cves_with_details() -> List[Dict[str, Any]]:
                 'patch_tuesday_date': row['patch_tuesday_date']
             })
         
-        logger.info(f"Fetched {len(all_cves)} CVEs with details for dashboard")
+        logger.debug(f"Fetched {len(all_cves)} CVEs with details for dashboard")
         return all_cves
     
     except sqlite3.Error as e:
@@ -785,7 +817,7 @@ def get_filtered_cves(
                 'patch_tuesday_date': row['patch_tuesday_date']
             })
         
-        logger.info(f"Fetched {len(filtered_cves)} CVEs with applied filters")
+        logger.debug(f"Fetched {len(filtered_cves)} CVEs with applied filters")
         return filtered_cves
     
     except sqlite3.Error as e:
@@ -842,7 +874,7 @@ def update_cve_microsoft_data(
         conn.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"Updated CVE {cve_id} with Microsoft data (severity: {severity_str}, product: {product_family_str})")
+            logger.debug(f"Updated CVE {cve_id} with Microsoft data (severity: {severity_str}, product: {product_family_str})")
             return True
         else:
             logger.warning(f"No CVE found with ID {cve_id} for Microsoft data update")
@@ -883,7 +915,7 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
         row = cursor.fetchone()
         
         if not row:
-            logger.info(f"No CVE found with ID {cve_id}")
+            logger.debug(f"No CVE found with ID {cve_id}")
             return None
             
         # Parse the JSON alerts
@@ -917,7 +949,7 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
             'patch_tuesday_date': row['patch_tuesday_date']
         }
         
-        logger.info(f"Found CVE details for {cve_id}")
+        logger.debug(f"Found CVE details for {cve_id}")
         return cve_data
     
     except sqlite3.Error as e:
@@ -928,10 +960,11 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
             conn.close()
 
 def store_or_update_cve(cve_data):
+    log_to_file(f"[DB_HANDLER_SAVE] store_or_update_cve called for {cve_data.get('cve_id')}. Processed_at in data: {cve_data.get('processed_at')}")
     """
     Stores a single CVE in the database, or updates it if it already exists.
     Unlike store_cves which uses INSERT OR IGNORE, this function will update
-    existing records with new information.
+    existing records with new debugrmation.
     
     Args:
         cve_data (dict): A dictionary containing CVE data.
@@ -945,7 +978,7 @@ def store_or_update_cve(cve_data):
         return False
     
     cve_id = cve_data.get('cve_id')
-    logger.info(f"store_or_update_cve called for {cve_id}")
+    logger.debug(f"store_or_update_cve called for {cve_id}")
     log_to_file(f"store_or_update_cve called for {cve_id}")
     
     # Initialize database if not already done
@@ -965,7 +998,7 @@ def store_or_update_cve(cve_data):
         else:
             abs_db_path = db_path
             
-        logger.info(f"Database absolute path: {abs_db_path}")
+        logger.debug(f"Database absolute path: {abs_db_path}")
         log_to_file(f"Database path: {abs_db_path}")
         
         # Check if database directory exists
@@ -996,12 +1029,12 @@ def store_or_update_cve(cve_data):
         # Check if the CVE already exists
         cursor.execute("SELECT 1 FROM cves WHERE cve_id = ?", (cve_id,))
         exists = cursor.fetchone() is not None
-        logger.info(f"CVE {cve_id} exists in database: {exists}")
+        logger.debug(f"CVE {cve_id} exists in database: {exists}")
         log_to_file(f"CVE exists in DB: {exists}")
         
         if exists:
             # Update existing CVE
-            logger.info(f"Updating existing CVE {cve_id}")
+            logger.debug(f"Updating existing CVE {cve_id}")
             
             # Build the update query based on available data
             update_fields = []
@@ -1092,7 +1125,7 @@ def store_or_update_cve(cve_data):
             update_query = f"UPDATE cves SET {', '.join(update_fields)} WHERE cve_id = ?"
             update_values.append(cve_id)
             
-            logger.info(f"Executing query: {update_query} with params: {update_values}")
+            logger.debug(f"Executing query: {update_query} with params: {update_values}")
             log_to_file(f"Executing UPDATE for {cve_id}")
             
             cursor.execute(update_query, update_values)
@@ -1100,7 +1133,7 @@ def store_or_update_cve(cve_data):
             log_to_file(f"Update affected {affected_rows} rows")
         else:
             # Insert new CVE
-            logger.info(f"Inserting new CVE {cve_id}")
+            logger.debug(f"Inserting new CVE {cve_id}")
             log_to_file(f"Inserting new CVE {cve_id}")
             
             # Prepare values for comprehensive insert
@@ -1178,7 +1211,7 @@ def store_or_update_cve(cve_data):
             placeholders = ', '.join(['?' for _ in fields])
             insert_query = f"INSERT INTO cves ({', '.join(fields)}) VALUES ({placeholders})"
             
-            logger.info(f"Executing query: {insert_query}")
+            logger.debug(f"Executing query: {insert_query}")
             log_to_file(f"Executing INSERT for {cve_id}")
             
             cursor.execute(insert_query, values)
