@@ -388,7 +388,7 @@ Integration with public exploit repositories provides:
 - `numpy` - For numerical operations
 
 
-## 🗺️ Project Roadmap & Future Vision
+## Project Roadmap & Future Vision
 
 VIPER aims to be a comprehensive, AI-driven Cyber Threat Intelligence (CTI) platform, drawing inspiration from advanced, multi-layered CTI systems. Our current version provides a strong foundation with NVD, EPSS, CISA KEV, and Microsoft MSRC data ingestion, coupled with Gemini AI for analysis, risk scoring, and an interactive Streamlit dashboard with real-time CVE lookup.
 
