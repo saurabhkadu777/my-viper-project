@@ -1,6 +1,29 @@
+<p align="center">
+  
+  <img src="https://img.shields.io/github/last-commit/ozanunal0/viper?style=flat-square&logo=git&logoColor=white" alt="Last Commit">
+  <img src="https://img.shields.io/github/stars/ozanunal0/viper?style=flat-square&logo=github&label=Stars" alt="GitHub Stars">
+  <img src="https://img.shields.io/github/forks/ozanunal0/viper?style=flat-square&logo=github&label=Forks" alt="GitHub Forks">
+
+
+</p>
+
+
+
+<p align="left">
+
+![Google Gemini](https://img.shields.io/badge/google%20gemini-8E75B2?style=for-the-badge&logo=google%20gemini&logoColor=white)
+![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![macOS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0)
+![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
+![GitLab](https://img.shields.io/badge/gitlab-%23181717.svg?style=for-the-badge&logo=gitlab&logoColor=white)
+![PyCharm](https://img.shields.io/badge/pycharm-143?style=for-the-badge&logo=pycharm&logoColor=black&color=black&labelColor=green)
+</p>
+
 # 🛡️ VIPER - Vulnerability Intelligence, Prioritization, and Exploitation Reporter
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **VIPER is your AI-powered co-pilot in the complex world of cyber threats, designed to provide actionable Vulnerability Intelligence, Prioritization, and Exploitation Reporting.**
 
@@ -13,7 +36,9 @@ In an era of ever-increasing cyber threats, VIPER cuts through the noise. It ing
 4.  [🛠️ Technology Stack](#-tech-stack)
 5.  [🚀 Installation & Setup](#-installation--setup)
 6.  [⚙️ Usage](#-usage)
-7.  [📈 Development Status & Roadmap](#-project-roadmap--future-vision)
+7.  [🗂️ Project Structure](#project-structure)
+8.  [🔍Public Exploit Search](#-public-exploit-search)
+9.  [📈 Development Status & Roadmap](#-project-roadmap--future-vision)
 
 ---
 ## Dashboard
@@ -24,16 +49,16 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
 ![Home](https://i.imgur.com/5Ri40Oc.png)
 
 ### Main Dashboard
-![Dashboard](https://i.imgur.com/yT3PKpU.png)
+![Dashboard](https://i.imgur.com/GEHUX22.png)
 
 ### Detailed Analysis View
-![Detailed Analysis](https://i.imgur.com/YnYxObv.png)
+![Detailed Analysis](https://i.imgur.com/iGYK3Us.png)
 
 ### Live CVE Lookup
-![Live CVE Lookup](https://i.imgur.com/l4hPoW8.png)
+![Live CVE Lookup](https://i.imgur.com/sUouPLV.png)
 
 ### Analytics & Trends
-![Analytics](https://i.imgur.com/uWX0Y2g.png)
+![Analytics](https://i.imgur.com/HPlHdpR.png)
 
 
 ## ✨ Core Features
@@ -43,6 +68,7 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
     * ✅ **EPSS (Exploit Prediction Scoring System):** Likelihood sıcaklık of vulnerability exploitation.
     * ✅ **CISA KEV (Known Exploited Vulnerabilities) Catalog:** Confirmed actively exploited vulnerabilities.
     * ✅ **Microsoft Patch Tuesday Updates:** Security bulletins and patch information.
+    * ✅ **Public Exploit Repositories:** Search for available exploits from Exploit-DB and GitHub.
 * **AI-Powered Analysis & Prioritization:**
     * 🧠 Deep contextual analysis of CVE descriptions and related data using **Google Gemini AI**.
     * Automated priority assignment (HIGH, MEDIUM, LOW) based on AI assessment.
@@ -130,9 +156,14 @@ This feature is ideal for:
         ```bash
         cp .env.example .env
         ```
-    * Open the `.env` file in a text editor and add your **Google Gemini API Key** to the `GEMINI_API_KEY` variable.
+    * Open the `.env` file in a text editor and add your API keys:
         ```dotenv
+        # Required
         GEMINI_API_KEY=AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE
+        
+        # Optional but recommended
+        GITHUB_TOKEN=your_github_token_here  # Required for GitHub exploit search
+        
         # Review and optionally modify other settings in this file as needed.
         ```
 
@@ -176,16 +207,20 @@ viper/
 ├── requirements.txt         # Project dependencies
 ├── README.md                # Project documentation
 ├── .gitignore               # Git ignore file
+├── test_exploit_search.py   # Tool to test GitHub exploit search
+├── update_github_exploits.py # Tool to update CVEs with GitHub exploit data
 ├── data/                    # Data storage directory
 │   └── threat_intel_gemini_mvp.db  # SQLite database
 ├── logs/                    # Log files directory
 │   └── viper.log            # Application logs
 ├── scripts/                 # Utility scripts
-│   └── run_dashboard.sh     # Script to run the dashboard
+│   ├── run_dashboard.sh     # Script to run the dashboard
+│   └── update_exploits.py   # Script to update exploit data for existing CVEs
 ├── src/                     # Source code
 │   ├── clients/             # API clients
 │   │   ├── cisa_kev_client.py        # CISA KEV API client
 │   │   ├── epss_client.py            # EPSS API client
+│   │   ├── exploit_search_client.py  # Public exploit search client
 │   │   ├── nvd_client.py             # NVD API client
 │   │   └── microsoft_update_client.py # Microsoft Patch Tuesday API client
 │   ├── dashboard/           # Dashboard application
@@ -211,6 +246,7 @@ VIPER calculates a combined risk score for each vulnerability using:
 - EPSS score (probability of exploitation)
 - CISA KEV status (with a customizable boost factor)
 - Microsoft severity rating (Critical, Important, Moderate, Low)
+- Public exploit availability (with a customizable boost factor)
 
 The weights for each factor can be configured via environment variables:
 - `RISK_WEIGHT_GEMINI` (default: 0.4)
@@ -218,6 +254,7 @@ The weights for each factor can be configured via environment variables:
 - `RISK_WEIGHT_EPSS` (default: 0.3)
 - `RISK_WEIGHT_MS_SEVERITY` (default: 0.2)
 - `KEV_BOOST_FACTOR` (default: 0.5)
+- `PUBLIC_EXPLOIT_BOOST_FACTOR` (default: 0.15) - Boosts risk scores for CVEs with confirmed public exploits
 
 ## Alert Generation
 
@@ -233,12 +270,7 @@ Alert thresholds can be configured via environment variables (see config.py).
 
 ## PDF Export Feature
 
-VIPER provides the ability to export detailed vulnerability analysis reports as PDF documents. This feature is useful for:
-
-- Sharing vulnerability information with team members
-- Documenting vulnerability assessments
-- Including in security briefings or reports
-- Maintaining audit records for compliance purposes
+VIPER provides the ability to export detailed vulnerability analysis reports as PDF documents. 
 
 ### Using the PDF Export Feature
 
@@ -260,6 +292,57 @@ The PDF report includes:
 - **Recommended Actions**: Mitigation recommendations based on priority level
 - **References**: Links to relevant resources
 - **Affected Products**: CPE entries for affected systems
+
+## 🔍 Public Exploit Search
+
+The Public Exploit Search feature allows VIPER to search for and identify publicly available exploits for vulnerabilities, adding critical context to your risk assessments:
+
+* **Multi-Source Exploit Search:** 
+  * Searches Exploit-DB for known exploits related to CVEs
+  * Searches GitHub repositories and code for exploit proof-of-concepts
+  * Results are cached to minimize API calls
+
+### GitHub Exploit Search
+
+VIPER includes robust functionality to search GitHub for exploits and proof-of-concept code related to CVEs:
+
+* **Comprehensive GitHub Search:**
+  * Searches both repositories and code files for each CVE
+  * Uses multiple targeted queries (`exploit`, `PoC`, `proof of concept`)
+  * Filters results to find genuine exploits using content analysis
+  * Includes repository metadata such as star count and descriptions
+
+
+### GitHub API Configuration
+
+To enable GitHub exploit searching, you need to set up a GitHub Personal Access Token:
+
+1. **Generate a GitHub Personal Access Token**:
+   - Go to GitHub → Settings → Developer settings → Personal access tokens
+   - Create a token with the `public_repo` scope (this is enough for searching public repositories)
+   - For newer GitHub accounts, you'll need to create a "Fine-grained token" or a "Classic token"
+
+2. **Add the token to your .env file**:
+   ```
+   GITHUB_TOKEN=your_github_token_here
+   ```
+
+3. **Additional exploit search configuration options**:
+   ```
+   # GitHub API URL (defaults to https://api.github.com)
+   GITHUB_API_URL=https://api.github.com
+   
+   # Exploit-DB API URL (defaults to https://exploits.shodan.io/api)
+   EXPLOIT_DB_API_URL=https://exploits.shodan.io/api
+   
+   # Maximum results per exploit source (defaults to 10)
+   EXPLOIT_SEARCH_MAX_RESULTS=10
+   
+   # Risk score boost for vulnerabilities with public exploits (0.0-1.0, defaults to 0.15)
+   PUBLIC_EXPLOIT_BOOST_FACTOR=0.15
+   ```
+
+If no GitHub token is provided, the system will skip GitHub searches and only use Exploit-DB as a source.
 
 ## API Integration
 
@@ -286,6 +369,12 @@ Integration with the Microsoft Security Response Center (MSRC) API provides:
 - Patch Tuesday update information
 - Security bulletin details
 - Microsoft-specific vulnerability information and severity ratings
+
+### Exploit Database & GitHub API
+Integration with public exploit repositories provides:
+- Identification of publicly available exploits for CVEs
+- Details and links to exploit code
+- Enhanced risk assessment based on exploit availability
 
 ## Dependencies
 
