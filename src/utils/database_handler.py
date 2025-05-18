@@ -14,38 +14,6 @@ from .config import get_db_file_name
 
 # Initialize module logger
 logger = logging.getLogger(__name__)
-
-# Bu modül için özel debug log dosyasının mutlak yolu
-# __file__ .../viper/src/utils/database_handler.py dosyasını işaret eder
-# dirname(__file__) -> .../viper/src/utils
-# dirname(dirname(__file__)) -> .../viper/src
-# dirname(dirname(dirname(__file__))) -> .../viper (Bu proje kök dizinidir)
-PROJECT_ROOT_DH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-LOG_DIR_ABS_DH = os.path.join(PROJECT_ROOT_DH, 'logs')
-DB_HANDLER_LOG_FILE = os.path.join(LOG_DIR_ABS_DH, "database_handler_execution.log") # Ayırt edici bir isim
-
-try:
-    os.makedirs(LOG_DIR_ABS_DH, exist_ok=True) # Log klasörünü oluştur
-    # Modül yüklendiğinde bu dosyaya bir başlangıç kaydı atmayı dene
-    with open(DB_HANDLER_LOG_FILE, "a", encoding="utf-8") as f_init:
-        f_init.write(f"--- DB_HANDLER_MODULE_LOAD_LOG: database_handler.py Streamlit tarafından yüklendi: {datetime.now()} ---\n")
-    # Konsola da bilgi verelim
-    print(f"DB_HANDLER_SETUP: {DB_HANDLER_LOG_FILE} dosyasına ilk log denemesi yapıldı.", file=sys.stderr)
-except Exception as e_init_log:
-    # Bu çok kritik bir hata olur, çünkü hiçbir log yazamayız
-    print(f"CRITICAL_ERROR_DB_HANDLER_SETUP: {DB_HANDLER_LOG_FILE} oluşturulamadı/yazılamadı: {str(e_init_log)}", file=sys.stderr)
-
-def log_to_file_db_handler(message): # Fonksiyon adını netleştirelim
-    # Her zaman önce konsola yazdırmayı dene (Streamlit konsolunda görünür)
-    print(f"Attempting DB_HANDLER_LOG: {message}", file=sys.stderr)
-    try:
-        with open(DB_HANDLER_LOG_FILE, "a", encoding="utf-8") as f:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"{timestamp} - DB_HANDLER_LOG_CONTENT: {message}\n")
-    except Exception as e_log_db:
-        # Bu olursa hiçbir logumuz olmaz, çok kritik
-        print(f"CRITICAL_ERROR_LOG_TO_FILE_DB_HANDLER: {DB_HANDLER_LOG_FILE} dosyasına yazılamadı. Hata: {str(e_log_db)}. Mesaj: {message}", file=sys.stderr)
-
 # Add direct file logging for critical database operations
 def log_to_file(message):
     """Write directly to a debug log file for database operations"""

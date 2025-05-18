@@ -231,6 +231,36 @@ VIPER generates alerts based on configurable rules:
 
 Alert thresholds can be configured via environment variables (see config.py).
 
+## PDF Export Feature
+
+VIPER provides the ability to export detailed vulnerability analysis reports as PDF documents. This feature is useful for:
+
+- Sharing vulnerability information with team members
+- Documenting vulnerability assessments
+- Including in security briefings or reports
+- Maintaining audit records for compliance purposes
+
+### Using the PDF Export Feature
+
+1. Navigate to the "Detailed Vulnerability Analysis" page in the dashboard
+2. Select a CVE from the dropdown menu to view its details
+3. Scroll to the bottom of the vulnerability details
+4. Click the "Export Analysis Report (PDF)" button
+5. Save the generated PDF to your preferred location
+
+### What's Included in the PDF Report
+
+The PDF report includes:
+
+- **Summary Information**: CVE ID, priority level, CISA KEV status, etc.
+- **Description**: The full vulnerability description
+- **Risk Metrics**: CVSS score, EPSS score, risk score, etc.
+- **AI Analysis**: The AI assessment of the vulnerability
+- **Alerts and Concerns**: Any specific alerts related to the vulnerability
+- **Recommended Actions**: Mitigation recommendations based on priority level
+- **References**: Links to relevant resources
+- **Affected Products**: CPE entries for affected systems
+
 ## API Integration
 
 ### NVD API
@@ -331,3 +361,4 @@ Here's where we're headed:
 * **[ ] Database Optimization/Migration:** For larger deployments, consider migrating from SQLite to a more scalable database like PostgreSQL.
 
 This roadmap is ambitious and will evolve. Community contributions and feedback are highly encouraged as we build VIPER into a powerful open-source CTI tool!
+

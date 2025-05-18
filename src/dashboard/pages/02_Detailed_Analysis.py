@@ -14,6 +14,7 @@ import re
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from src.utils.database_handler import get_all_cves_with_details, get_filtered_cves
+from src.utils.pdf_generator import generate_cve_report
 
 # Set the page title and add refresh button at the top right
 title_col, refresh_col = st.columns([6, 1])
@@ -415,14 +416,27 @@ if ms_severity:
         - Prioritize based on system exposure and criticality
         """)
 
-# Add a button to export the analysis as PDF (would require additional implementation)
-st.download_button(
-    label="Export Analysis Report (PDF)",
-    data="This feature would generate a PDF report",
-    file_name=f"{selected_cve}_analysis.pdf",
-    mime="application/pdf",
-    disabled=True  # Currently disabled as we'd need to implement PDF generation
-)
+# Generate PDF report for the selected CVE
+try:
+    pdf_bytes = generate_cve_report(selected_data)
+    
+    # Add a button to export the analysis as PDF
+    st.download_button(
+        label="Export Analysis Report (PDF)",
+        data=pdf_bytes,
+        file_name=f"{selected_cve}_analysis.pdf",
+        mime="application/pdf"
+    )
+except Exception as e:
+    st.error(f"Error generating PDF report: {str(e)}")
+    # Keep the disabled button as a fallback
+    st.download_button(
+        label="Export Analysis Report (PDF)",
+        data="Error generating PDF",
+        file_name=f"{selected_cve}_analysis.pdf",
+        mime="application/pdf",
+        disabled=True
+    )
 
 # Add footer with timestamp
 st.markdown("---")
