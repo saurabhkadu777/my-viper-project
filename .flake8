@@ -1,0 +1,21 @@
+[flake8]
+max-line-length = 120
+exclude = .git,__pycache__,build,dist,.venv,venv
+# Temporarily ignoring many errors for initial setup
+ignore = E203, W503, D100, D101, D102, D103, D104, D105, D106, D107, D200, D205, D400, D401, F401, E501, E402, E712, F541, F811
+# E203: whitespace before ':' (conflicts with Black)
+# W503: line break before binary operator (conflicts with Black)
+# D100-D107: Missing docstring in various contexts
+# D200: One-line docstring should fit on one line with quotes
+# D205: 1 blank line required between summary line and description
+# D400: First line should end with a period
+# D401: First line should be in imperative mood
+# F401: module imported but unused
+# E501: line too long
+# E402: module level import not at top of file
+# E712: Comparison to True/False
+# F541: f-string is missing placeholders
+# F811: redefinition of unused variable
+per-file-ignores =
+    __init__.py: F401
+    # F401: module imported but unused

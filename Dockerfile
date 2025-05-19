@@ -39,4 +39,4 @@ RUN mkdir -p /app/data
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Use entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"] 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

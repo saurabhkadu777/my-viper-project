@@ -14,4 +14,4 @@ fi
 
 # Run the Streamlit dashboard
 echo "Starting VIPER CTI Dashboard..."
-streamlit run src/dashboard/app.py 
+streamlit run src/dashboard/app.py

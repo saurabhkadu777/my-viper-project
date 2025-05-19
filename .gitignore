@@ -38,4 +38,4 @@ secrets.json
 .docker/
 docker-data/
 *.dockerfile.bak
-.dockerignore.bak 
+.dockerignore.bak

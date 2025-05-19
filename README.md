@@ -1,8 +1,9 @@
 <p align="center">
-  
+
   <img src="https://img.shields.io/github/last-commit/ozanunal0/viper?style=flat-square&logo=git&logoColor=white" alt="Last Commit">
   <img src="https://img.shields.io/github/stars/ozanunal0/viper?style=flat-square&logo=github&label=Stars" alt="GitHub Stars">
   <img src="https://img.shields.io/github/forks/ozanunal0/viper?style=flat-square&logo=github&label=Forks" alt="GitHub Forks">
+
 </p>
 
 
@@ -15,6 +16,7 @@
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
 ![PyCharm](https://img.shields.io/badge/pycharm-143?style=for-the-badge&logo=pycharm&logoColor=black&color=black&labelColor=green)
+
 </p>
 
 
@@ -156,10 +158,10 @@ This feature is ideal for:
         ```dotenv
         # Required
         GEMINI_API_KEY=AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE
-        
+
         # Optional but recommended
         GITHUB_TOKEN=your_github_token_here  # Required for GitHub exploit search
-        
+
         # Review and optionally modify other settings in this file as needed.
         ```
 
@@ -266,7 +268,7 @@ Alert thresholds can be configured via environment variables (see config.py).
 
 ## PDF Export Feature
 
-VIPER provides the ability to export detailed vulnerability analysis reports as PDF documents. 
+VIPER provides the ability to export detailed vulnerability analysis reports as PDF documents.
 
 ### Using the PDF Export Feature
 
@@ -293,7 +295,7 @@ The PDF report includes:
 
 The Public Exploit Search feature allows VIPER to search for and identify publicly available exploits for vulnerabilities, adding critical context to your risk assessments:
 
-* **Multi-Source Exploit Search:** 
+* **Multi-Source Exploit Search:**
   * Searches Exploit-DB for known exploits related to CVEs
   * Searches GitHub repositories and code for exploit proof-of-concepts
   * Results are cached to minimize API calls
@@ -327,13 +329,13 @@ To enable GitHub exploit searching, you need to set up a GitHub Personal Access 
    ```
    # GitHub API URL (defaults to https://api.github.com)
    GITHUB_API_URL=https://api.github.com
-   
+
    # Exploit-DB API URL (defaults to https://exploits.shodan.io/api)
    EXPLOIT_DB_API_URL=https://exploits.shodan.io/api
-   
+
    # Maximum results per exploit source (defaults to 10)
    EXPLOIT_SEARCH_MAX_RESULTS=10
-   
+
    # Risk score boost for vulnerabilities with public exploits (0.0-1.0, defaults to 0.15)
    PUBLIC_EXPLOIT_BOOST_FACTOR=0.15
    ```
@@ -446,4 +448,3 @@ Here's where we're headed:
 * **[ ] Database Optimization/Migration:** For larger deployments, consider migrating from SQLite to a more scalable database like PostgreSQL.
 
 This roadmap is ambitious and will evolve. Community contributions and feedback are highly encouraged as we build VIPER into a powerful open-source CTI tool!
-

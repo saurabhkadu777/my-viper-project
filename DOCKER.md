@@ -12,7 +12,7 @@ This document explains how to run the VIPER Vulnerability Intelligence Platform 
 1. Copy the example environment file and set your API keys:
 
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 
 2. Edit the `.env` file to add your API keys:
@@ -21,6 +21,8 @@ cp env.example .env
    - Other configuration as needed
 
 ## Running with Docker Compose
+
+
 
 1. Start the application:
 
@@ -90,4 +92,4 @@ docker-compose logs viper-app
 
 ```bash
 ls -la ./data
-``` 
+```

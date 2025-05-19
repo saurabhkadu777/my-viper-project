@@ -51,4 +51,4 @@ node_modules/
 
 # Keep data and log directories, just not their contents
 !data/.gitkeep
-!logs/.gitkeep 
+!logs/.gitkeep
