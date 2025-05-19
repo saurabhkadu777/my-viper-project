@@ -1,0 +1,16 @@
+[server]
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+serverAddress = "0.0.0.0"
+serverPort = 8501
+gatherUsageStats = false
+
+[theme]
+# Matrix-inspired theme
+primaryColor="#00FF41"        # Matrix terminal green
+backgroundColor="#000000"     # Pure black background
+secondaryBackgroundColor="#0D0208"  # Very dark background for cards/containers
+textColor="#00FF41"           # Matrix green text
+font="monospace"              # Classic terminal monospace font
