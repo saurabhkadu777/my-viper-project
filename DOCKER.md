@@ -22,15 +22,21 @@ cp .env.example .env
 
 ## Running with Docker Compose
 
-1. Start the application:
+1. Build the application:
+
+```bash
+docker-compose build
+```
+
+2. Start the application:
 
 ```bash
 docker-compose up -d
 ```
 
-2. Access the VIPER dashboard at: http://localhost:8501
+3. Access the VIPER dashboard at: http://localhost:8501
 
-3. Stop the application:
+4. Stop the application:
 
 ```bash
 docker-compose down
