@@ -1,10 +1,15 @@
-<p align="center">
+<div align="center">
 
   <img src="https://img.shields.io/github/last-commit/ozanunal0/viper?style=flat-square&logo=git&logoColor=white" alt="Last Commit">
   <img src="https://img.shields.io/github/stars/ozanunal0/viper?style=flat-square&logo=github&label=Stars" alt="GitHub Stars">
   <img src="https://img.shields.io/github/forks/ozanunal0/viper?style=flat-square&logo=github&label=Forks" alt="GitHub Forks">
 
-</p>
+[![Docker Support](https://img.shields.io/badge/Docker-Supported-blue?logo=docker)](https://www.docker.com/)
+[![Tests: Passing](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)]()
+
+
+</div>
+
 
 
 <p align="center">
