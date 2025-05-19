@@ -29,7 +29,7 @@ ENV PYTHONPATH=/app
 # ENV STREAMLIT_SERVER_HEADLESS=true
 # ENV STREAMLIT_SERVER_ENABLE_CORS=false
 
-# Set database file path
+# Set database file path - this can be overridden by docker-compose.yml
 ENV DB_FILE_NAME=/app/data/viper.db
 
 # Create data directory

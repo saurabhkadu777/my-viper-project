@@ -156,7 +156,7 @@ def get_nvd_pagination_delay():
 def get_db_file_name():
     """
     Retrieves the database file name.
-    Defaults to 'threat_intel_gemini_mvp.db' if not specified.
+    Defaults to 'viper.db' if not specified.
     Returns the absolute path to ensure consistent access.
     Creates necessary directories if they don't exist.
 
@@ -166,22 +166,37 @@ def get_db_file_name():
     db_file = os.getenv("DB_FILE_NAME", "")
 
     if not db_file:
-        default = "threat_intel_gemini_mvp.db"
+        default = "viper.db"
         logger.warning(f"DB_FILE_NAME not found in environment variables. Using default: {default}")
         db_file = default
 
-    # First, try data directory
-    try:
-        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        data_dir = os.path.join(script_dir, "data")
+    # If an absolute path is provided, use it directly
+    if os.path.isabs(db_file):
+        # Ensure the directory exists
+        db_dir = os.path.dirname(db_file)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                logger.info(f"Creating directory for absolute DB path: {db_dir}")
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create directory for DB: {str(e)}")
 
-        # Create data directory if it doesn't exist
+        logger.info(f"Using database at absolute path: {db_file}")
+        return db_file
+
+    # For relative paths, use the data directory in the project root
+    try:
+        # Get the project root directory (two levels up from this script)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        # Create data directory in project root (not nested)
+        data_dir = os.path.join(project_root, "data")
         if not os.path.exists(data_dir):
             logger.info(f"Creating data directory at: {data_dir}")
             os.makedirs(data_dir, exist_ok=True)
 
-        # Return path in data directory
-        db_path = os.path.join(data_dir, db_file)
+        # Return absolute path to the database file
+        db_path = os.path.join(data_dir, os.path.basename(db_file))
         logger.info(f"Using database file in data directory: {db_path}")
 
         # Test if the directory is writable
@@ -199,28 +214,10 @@ def get_db_file_name():
         logger.warning(f"Error setting up data directory: {str(e)}")
         # Fall through to use project root or absolute path
 
-    # If an absolute path is provided, use it
-    if os.path.isabs(db_file):
-        # Ensure the directory exists
-        db_dir = os.path.dirname(db_file)
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                logger.info(f"Creating directory for absolute DB path: {db_dir}")
-                os.makedirs(db_dir, exist_ok=True)
-            except Exception as e:
-                logger.error(f"Failed to create directory for DB: {str(e)}")
-
-        logger.info(f"Using database at absolute path: {db_file}")
-        return db_file
-
     # Use project root as fallback
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    abs_path = os.path.join(root_dir, db_file)
-    abs_return_path = os.path.abspath(db_path)  # db_path fonksiyon içinde hesaplanan yoldur
-    logger.info(f"[CONFIG_GET_DB_PATH] Returning DB path: {abs_return_path}")
-    logger.info(f"Using database file in project root: {abs_path}")
-    return abs_path
-    return abs_return_path  # Fonksiyonun normalde döndürdüğü yolu döndürün
+    fallback_path = os.path.join(project_root, db_file)
+    logger.info(f"Using database file in project root as fallback: {fallback_path}")
+    return fallback_path
 
 
 def get_log_file_name():

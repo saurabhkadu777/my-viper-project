@@ -30,20 +30,24 @@ st.sidebar.header("Filters")
 
 # Date filters with defaults (last 30 days)
 today = datetime.now().date()
-thirty_days_ago = today - timedelta(days=30)
+# Use a much older date to include all vulnerabilities
+thirty_days_ago = datetime(2020, 1, 1).date()  # Past date
+future_date = datetime(2030, 1, 1).date()  # Future date to include all vulnerabilities
 
 col1, col2 = st.sidebar.columns(2)
 with col1:
     date_start = st.date_input("From Date", value=thirty_days_ago, format="YYYY-MM-DD")
 with col2:
-    date_end = st.date_input("To Date", value=today, format="YYYY-MM-DD")
+    date_end = st.date_input("To Date", value=future_date, format="YYYY-MM-DD")
 
 # Convert to string format that the database expects
 date_start_str = date_start.isoformat() if date_start else None
 date_end_str = date_end.isoformat() if date_end else None
 
 # Priority filter
-priorities = st.sidebar.multiselect("Priority Level", options=["HIGH", "MEDIUM", "LOW"], default=["HIGH", "MEDIUM"])
+priorities = st.sidebar.multiselect(
+    "Priority Level", options=["HIGH", "MEDIUM", "LOW"], default=["HIGH", "MEDIUM", "LOW"]
+)
 
 # CVSS Score range
 cvss_range = st.sidebar.slider("CVSS Score Range", min_value=0.0, max_value=10.0, value=(0.0, 10.0), step=0.1)
@@ -88,27 +92,73 @@ ms_product_filter = st.sidebar.text_input("Microsoft Product (contains)", "")
 # Keyword search
 keyword = st.sidebar.text_input("Search Description", "")
 
+# Add debug output to see what's being sent to the database - NOW AFTER all variables are defined
+st.sidebar.markdown("---")
+with st.sidebar.expander("Debug Info"):
+    st.write(f"Date filter: {date_start_str} to {date_end_str}")
+    st.write(f"Priority filter: {priorities}")
+    st.write(f"CVSS range: {cvss_min} to {cvss_max}")
+    st.write(f"EPSS range: {epss_min} to {epss_max}")
+    st.write(f"KEV filter: {is_in_kev}")
+    st.write(f"Exploit filter: {has_public_exploit}")
+    st.write(f"Microsoft severity: {microsoft_severity}")
+    st.write(f"Microsoft product: {ms_product_filter}")
+    st.write(f"Keyword: {keyword}")
+
 # Apply filters button
 apply_filters = st.sidebar.button("Apply Filters", type="primary")
 
+# Add a button to show all CVEs without any filters
+show_all = st.sidebar.button("Show All CVEs", type="secondary")
+
 # Fetch the CVE data with filters
-if "cve_data" not in st.session_state or apply_filters:
+if "cve_data" not in st.session_state or apply_filters or show_all:
     with st.spinner("Loading vulnerability data..."):
-        cve_data = get_filtered_cves(
-            date_start=date_start_str,
-            date_end=date_end_str,
-            priorities=priorities if priorities else None,
-            cvss_min=cvss_min,
-            cvss_max=cvss_max,
-            epss_min=epss_min,
-            epss_max=epss_max,
-            is_in_kev=is_in_kev,
-            has_public_exploit=has_public_exploit,
-            keyword=keyword if keyword else None,
-            microsoft_severity=microsoft_severity,
-            microsoft_product=ms_product_filter if ms_product_filter else None,
-        )
+        if show_all:
+            # Get all CVEs directly without filtering
+            from src.utils.database_handler import get_all_cves_with_details
+
+            cve_data = get_all_cves_with_details()
+            st.sidebar.success(f"Showing all {len(cve_data)} CVEs from database")
+        else:
+            # Use filtered data as before
+            cve_data = get_filtered_cves(
+                date_start=date_start_str,
+                date_end=date_end_str,
+                priorities=priorities if priorities else None,
+                cvss_min=cvss_min,
+                cvss_max=cvss_max,
+                epss_min=epss_min,
+                epss_max=epss_max,
+                is_in_kev=is_in_kev,
+                has_public_exploit=has_public_exploit,
+                keyword=keyword if keyword else None,
+                microsoft_severity=microsoft_severity,
+                microsoft_product=ms_product_filter if ms_product_filter else None,
+            )
+
         st.session_state.cve_data = cve_data
+
+        # Add debug info to the expander
+        with st.sidebar.expander("Debug Info"):
+            st.write(f"Retrieved {len(cve_data)} vulnerabilities")
+
+            # Get counts by priority
+            if cve_data:
+                priority_counts = {}
+                for cve in cve_data:
+                    priority = cve.get("gemini_priority")
+                    if priority in priority_counts:
+                        priority_counts[priority] += 1
+                    else:
+                        priority_counts[priority] = 1
+                st.write(f"Priority counts: {priority_counts}")
+
+            # Check the first and last dates to see if date filtering is working
+            if cve_data:
+                published_dates = [cve.get("published_date") for cve in cve_data if cve.get("published_date")]
+                if published_dates:
+                    st.write(f"Date range in results: {min(published_dates)} to {max(published_dates)}")
 
 # If no data, display a message
 if not st.session_state.cve_data:

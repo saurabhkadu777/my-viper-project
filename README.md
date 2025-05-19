@@ -453,3 +453,41 @@ Here's where we're headed:
 * **[ ] Database Optimization/Migration:** For larger deployments, consider migrating from SQLite to a more scalable database like PostgreSQL.
 
 This roadmap is ambitious and will evolve. Community contributions and feedback are highly encouraged as we build VIPER into a powerful open-source CTI tool!
+
+## 🐳 Docker Deployment
+
+VIPER can be deployed using Docker for easy setup and management:
+
+1. **Build and start the container:**
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Access the VIPER dashboard:**
+   Open http://localhost:8501 in your browser
+
+3. **View logs:**
+   ```bash
+   docker-compose logs viper-app
+   ```
+
+4. **Stop the container:**
+   ```bash
+   docker-compose down
+   ```
+
+For detailed Docker deployment instructions, database management, and troubleshooting, see [DOCKER.md](DOCKER.md).
+
+## Database Management
+
+VIPER is designed to automatically handle common database issues like duplicate columns during initialization. The database structure is maintained internally without requiring manual intervention.
+
+### Database Reset
+
+If you need to completely reset your database:
+
+```bash
+python scripts/reset_database.py
+```
+
+For Docker-specific database management commands, see the [Docker documentation](DOCKER.md).

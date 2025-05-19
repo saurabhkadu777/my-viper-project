@@ -5,14 +5,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: viper-app
+    container_name: viper
     ports:
       - "8501:8501"
     volumes:
       - ./data:/app/data
       - ./.streamlit:/app/.streamlit
     environment:
-      - DB_FILE_NAME=/app/data/threat_intel_gemini_mvp.db
+      # Explicitly set the database path for Docker
+      - DB_FILE_NAME=/app/data/viper.db
       # You can add your API keys and other configuration here
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
