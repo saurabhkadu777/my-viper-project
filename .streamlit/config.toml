@@ -8,7 +8,9 @@ serverPort = 8501
 gatherUsageStats = false
 
 [theme]
-primaryColor="#FF4B4B"
-backgroundColor="#FFFFFF"
-secondaryBackgroundColor="#F0F2F6"
-textColor="#262730"
+# Cyber-themed dark mode with neon highlights
+primaryColor="#00E4FF"        # Neon cyan for primary actions/highlights
+backgroundColor="#0B0C10"     # Dark space background
+secondaryBackgroundColor="#1F2833"  # Slightly lighter background for cards/containers
+textColor="#C5C6C7"           # Light gray text for better contrast
+font="monospace"              # Monospace font for that tech feel
