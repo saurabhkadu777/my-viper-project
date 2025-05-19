@@ -512,3 +512,92 @@ def get_microsoft_severity_factors():
         'Low': low,
         None: 0.0
     } 
+
+def get_github_token():
+    """
+    Retrieves the GitHub API token for searching exploits.
+    Returns None if not found (search will be limited).
+    
+    Returns:
+        str or None: The GitHub API token
+    """
+    token = os.getenv("GITHUB_TOKEN", "")
+    
+    if not token:
+        logger.warning("GITHUB_TOKEN not found in environment variables. GitHub search will be limited.")
+        return None
+        
+    return token
+
+def get_exploit_db_api_url():
+    """
+    Retrieves the Exploit-DB API URL.
+    Returns None if not specified, which will skip Exploit-DB searches.
+    
+    Returns:
+        str or None: The Exploit-DB API URL
+    """
+    url = os.getenv("EXPLOIT_DB_API_URL", "")
+    
+    if not url:
+        logger.warning("EXPLOIT_DB_API_URL not found in environment variables. Exploit-DB searches will be skipped.")
+        return None
+        
+    return url
+
+def get_github_api_url():
+    """
+    Retrieves the GitHub API URL.
+    Defaults to 'https://api.github.com' if not specified.
+    
+    Returns:
+        str: The GitHub API URL
+    """
+    url = os.getenv("GITHUB_API_URL", "")
+    
+    if not url:
+        default = "https://api.github.com"
+        logger.warning(f"GITHUB_API_URL not found in environment variables. Using default: {default}")
+        return default
+        
+    return url
+
+def get_exploit_search_max_results():
+    """
+    Retrieves the maximum number of results to fetch from each exploit source.
+    Defaults to 10 if not specified or invalid.
+    
+    Returns:
+        int: Maximum number of results per source
+    """
+    max_results = os.getenv("EXPLOIT_SEARCH_MAX_RESULTS", "")
+    
+    try:
+        value = int(max_results)
+        if value <= 0:
+            raise ValueError("Value must be positive")
+        return value
+    except (ValueError, TypeError):
+        default = 10
+        logger.warning(f"Invalid or missing EXPLOIT_SEARCH_MAX_RESULTS value. Using default: {default}")
+        return default
+
+def get_public_exploit_boost_factor():
+    """
+    Retrieves the boost factor for risk scoring when a public exploit is available.
+    Defaults to 0.15 if not specified or invalid.
+    
+    Returns:
+        float: The boost factor (0.0 to 1.0)
+    """
+    factor = os.getenv("PUBLIC_EXPLOIT_BOOST_FACTOR", "")
+    
+    try:
+        value = float(factor)
+        if not 0 <= value <= 1:
+            raise ValueError("Value must be between 0 and 1")
+        return value
+    except (ValueError, TypeError):
+        default = 0.15
+        logger.warning(f"Invalid or missing PUBLIC_EXPLOIT_BOOST_FACTOR value. Using default: {default}")
+        return default 

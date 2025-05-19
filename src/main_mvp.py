@@ -6,6 +6,8 @@ import logging
 import time
 import asyncio
 from datetime import datetime
+import yaml
+import os
 
 # Import configuration getters
 from src.utils.config import (
@@ -28,13 +30,16 @@ from src.utils.database_handler import (
     update_cve_risk_data,
     update_cve_kev_status,
     get_all_cve_ids_from_db,
-    update_cve_microsoft_data
+    update_cve_microsoft_data,
+    get_cve_details,
+    update_cve_exploit_data
 )
 from src.gemini_analyzer import analyze_cve_with_gemini_async
 from src.clients.epss_client import get_epss_score, get_epss_scores_batch
 from src.risk_analyzer import calculate_combined_risk_score, generate_alerts, analyze_cve_risk
 from src.clients.cisa_kev_client import fetch_kev_catalog
 from src.clients.microsoft_update_client import fetch_patch_tuesday_data, fetch_latest_patch_tuesday_data
+from src.clients.exploit_search_client import find_public_exploits
 
 # Configure logging
 log_level = get_log_level()
@@ -446,6 +451,52 @@ async def process_risk_scoring_alerts(cves_list):
     logger.info(f"Generated alerts for {cves_with_alerts_count} CVEs")
     return cves_with_alerts_count
 
+async def enrich_cves_with_exploits(cves_list):
+    """
+    Searches for public exploits for CVEs and updates the database.
+    
+    Args:
+        cves_list (list): List of CVEs to process
+        
+    Returns:
+        tuple: (processed_count, found_exploits_count) tuple
+    """
+    if not cves_list:
+        logger.info("No CVEs to check for public exploits")
+        return 0, 0
+    
+    logger.info(f"Searching for public exploits for {len(cves_list)} CVEs")
+    
+    processed_count = 0
+    found_exploits_count = 0
+    
+    # Process CVEs one by one to avoid overwhelming APIs
+    for cve in cves_list:
+        cve_id = cve.get('cve_id')
+        if not cve_id:
+            continue
+        
+        try:
+            # Search for public exploits
+            exploits = find_public_exploits(cve_id)
+            
+            # Update the database with exploit information
+            if update_cve_exploit_data(cve_id, exploits):
+                processed_count += 1
+                
+                if exploits and len(exploits) > 0:
+                    found_exploits_count += 1
+                    logger.info(f"Found {len(exploits)} public exploit(s) for {cve_id}")
+            
+            # Add a delay to avoid rate limiting
+            await asyncio.sleep(2)
+            
+        except Exception as e:
+            logger.error(f"Error checking for exploits for {cve_id}: {str(e)}")
+    
+    logger.info(f"Processed {processed_count} CVEs, found exploits for {found_exploits_count}")
+    return processed_count, found_exploits_count
+
 def run_cti_feed(days_back=None):
     """
     Runs the full CTI feed workflow:
@@ -455,9 +506,10 @@ def run_cti_feed(days_back=None):
     4. Sync with CISA KEV catalog
     5. Sync with Microsoft Patch Tuesday data
     6. Enrich CVEs with EPSS data
-    7. Analyze unprocessed CVEs with Gemini
-    8. Calculate risk scores and generate alerts
-    9. Display high/medium priority CVEs and alerts
+    7. Search for public exploits
+    8. Analyze unprocessed CVEs with Gemini
+    9. Calculate risk scores and generate alerts
+    10. Display high/medium priority CVEs and alerts
     
     Args:
         days_back (int, optional): Number of days to look back for CVEs.

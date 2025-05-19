@@ -158,7 +158,8 @@ async def analyze_cve_with_gemini_async(cve_data):
     Args:
         cve_data (dict): A dictionary containing CVE data (cve_id, description, cvss_v3_score,
                          and optionally epss_score, epss_percentile, is_in_kev, kev_date_added,
-                         microsoft_severity, microsoft_product_family, microsoft_product_name).
+                         microsoft_severity, microsoft_product_family, microsoft_product_name,
+                         has_public_exploit, exploit_references).
         
     Returns:
         tuple: (priority, raw_response) where priority is one of 'HIGH', 'MEDIUM', 'LOW', or 'ERROR_ANALYZING'.
@@ -199,6 +200,19 @@ async def analyze_cve_with_gemini_async(cve_data):
         ms_product_name = cve_data.get('microsoft_product_name', 'N/A')
         patch_tuesday_date = cve_data.get('patch_tuesday_date', 'N/A')
         
+        # Extract exploit information if available
+        has_public_exploit = cve_data.get('has_public_exploit', False)
+        exploit_references = cve_data.get('exploit_references', [])
+        
+        # Format exploit information for the prompt
+        exploit_info = "No"
+        if has_public_exploit and exploit_references:
+            if isinstance(exploit_references, list):
+                sources = set(exploit.get('source', 'Unknown') for exploit in exploit_references)
+                exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sources)}"
+            else:
+                exploit_info = "Yes, exploits available"
+        
         # Construct the prompt
         prompt = f"""
 Analyze the following CVE information to determine its priority for a typical mid-to-large sized organization. Consider potential impact (RCE, data breach, DoS), ubiquity of the affected software, and reported exploitation (if any can be inferred).
@@ -212,6 +226,7 @@ Microsoft Severity: {ms_severity}
 Affected Microsoft Product Family: {ms_product_family}
 Specific Microsoft Product: {ms_product_name}
 Microsoft Patch Tuesday Date: {patch_tuesday_date}
+Public Exploits Available: {exploit_info}
 Description: {description}
 
 Priority:

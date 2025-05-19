@@ -1,0 +1,54 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Logs and databases (keep the structure, exclude data)
+data/*.db
+logs/*.log
+*.log
+*.db
+debug.log
+database_debug.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment and configurations
+.env
+.env.*
+!env.example
+
+# Test files
+test_*.py
+*_test.py
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+DOCKER.md
+
+# Other
+.DS_Store
+Thumbs.db
+node_modules/
+
+# Keep data and log directories, just not their contents
+!data/.gitkeep
+!logs/.gitkeep 

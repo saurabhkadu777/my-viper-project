@@ -14,14 +14,14 @@ import sqlite3  # Added for database connection check
 import logging
 import sys # sys.stderr için eklendi
 from datetime import datetime # datetime için eklendi
+import plotly.graph_objects as go
 page_logger = logging.getLogger(__name__) 
 
 
 # Add the project root directory to the path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-
-
+from src.utils.config import get_db_file_name
 from src.utils.database_handler import (
     get_cve_details, 
     store_cves, 
@@ -29,13 +29,15 @@ from src.utils.database_handler import (
     update_cve_epss_data, 
     update_cve_kev_status,
     update_cve_priority, 
-    update_cve_risk_data
+    update_cve_risk_data,
+    update_cve_exploit_data
 )
 from src.clients.nvd_client import fetch_single_cve_details
 from src.clients.epss_client import get_epss_score
 from src.clients.cisa_kev_client import fetch_kev_catalog
 from src.gemini_analyzer import analyze_cve_with_gemini_async
 from src.risk_analyzer import analyze_cve_risk
+from src.clients.exploit_search_client import search_github, find_public_exploits, search_exploit_db
 
 # Initialize session state for tracking operations
 if 'save_attempted' not in st.session_state:
@@ -77,12 +79,88 @@ st.markdown("### Enter a CVE ID to lookup")
 # Create a form for CVE lookup
 with st.form(key="cve_lookup_form"):
     cve_id = st.text_input("CVE ID", placeholder="e.g. CVE-2023-12345")
+    
+    # Add data source options
+    st.markdown("### Data Sources")
+    data_source_cols = st.columns(3)
+    
+    with data_source_cols[0]:
+        use_nvd = st.checkbox("National Vulnerability Database (NVD)", value=True)
+    
+    with data_source_cols[1]:
+        use_github = st.checkbox("GitHub Exploits", value=True)
+    
+    with data_source_cols[2]:
+        use_exploitdb = st.checkbox("Exploit-DB", value=False)
+    
     lookup_button = st.form_submit_button("Look up CVE", type="primary")
 
 # Function to validate CVE ID format
 def is_valid_cve_id(cve_id: str) -> bool:
     """Validate CVE ID format (CVE-YYYY-NNNNN where NNNNN can be multiple digits)"""
     return bool(re.match(r'^CVE-\d{4}-\d+$', cve_id))
+
+# Function to display the results from the exploit search
+def display_exploit_results(cve_id, exploit_results):
+    """Display the results from an exploit search in a structured format"""
+    if exploit_results and len(exploit_results) > 0:
+        st.warning(f"⚠️ **{len(exploit_results)} potential exploit(s) found**")
+        
+        # Create a dataframe for better display
+        exploit_data = []
+        for exploit in exploit_results:
+            # Extract data
+            source = exploit.get('source', 'Unknown')
+            title = exploit.get('title', 'Unknown')
+            url = exploit.get('url', '#')
+            exploit_type = exploit.get('type', 'Unknown')
+            date = exploit.get('date_published', 'Unknown')
+            
+            # Handle stars correctly - convert to string to ensure consistent type
+            stars = exploit.get('stars', 0) if 'stars' in exploit else 0
+            # Ensure stars is always a string to avoid type conversion issues
+            stars_str = str(stars) if stars is not None else "0"
+            
+            desc = exploit.get('description', '') if 'description' in exploit else ''
+            
+            # Add to data
+            exploit_data.append({
+                "Source": source,
+                "Title": title,
+                "Type": exploit_type,
+                "Published": date,
+                "Stars": stars_str,  # Use string value
+                "URL": url,
+                "Description": desc[:100] + "..." if desc and len(desc) > 100 else desc
+            })
+        
+        exploit_df = pd.DataFrame(exploit_data)
+        
+        # Convert URLs to markdown links
+        exploit_df['URL'] = exploit_df['URL'].apply(lambda x: f"[View]({x})")
+        
+        # Display the dataframe
+        st.dataframe(exploit_df, use_container_width=True)
+        
+        # Warning about exploits
+        st.error("""
+        **⚠️ Warning:** The presence of these repositories suggests that exploit code may be available for this vulnerability.
+        This significantly increases the risk as attackers may use these exploits for malicious purposes.
+        """)
+        
+        # Update the database with exploit information if we have the CVE in our database
+        if st.button("Save exploit data to database", type="primary"):
+            try:
+                result = update_cve_exploit_data(cve_id, exploit_results)
+                if result:
+                    st.success(f"Successfully saved exploit data for {cve_id} to the database")
+                else:
+                    st.error("Failed to save data to database. The CVE might not exist in your database yet.")
+                    st.info("You may need to run the NVD ingestion process first to add this CVE to your database.")
+            except Exception as e:
+                st.error(f"Error saving to database: {str(e)}")
+    else:
+        st.success("No public exploits found for this vulnerability.")
 
 # Function to check for CVE in KEV catalog
 def check_cve_in_kev(cve_id: str, kev_catalog: list) -> tuple:
@@ -323,149 +401,383 @@ log_debug(f"Page loaded/reloaded. Session state: save_attempted={st.session_stat
 
 # Main execution flow
 if lookup_button and cve_id:
-    # Validate CVE ID
+    # Validate the CVE ID format
     if not is_valid_cve_id(cve_id):
-        st.error("Invalid CVE ID format. Please use the format CVE-YYYY-NNNNN (e.g., CVE-2023-12345).")
+        st.error("Please enter a valid CVE ID in the format CVE-YYYY-NNNNN.")
     else:
-        # First check local database
-        with st.spinner("Checking local database..."):
-            local_cve_data = get_cve_details(cve_id)
+        log_debug(f"Looking up CVE: {cve_id}")
         
-        if local_cve_data:
-            st.success("CVE found in local database!")
-            display_cve_details(local_cve_data, "Local Database")
-            
-            # Offer option to fetch live data
-            fetch_live = st.checkbox("Fetch live data and re-analyze", value=False)
-            
-            if fetch_live:
-                perform_live_fetch = st.button("Fetch and Analyze", type="primary")
-                
-                if perform_live_fetch:
-                    st.session_state.perform_live_fetch = True
+        # Check if we have a database connection
+        db_ok, db_message = check_database_connection()
+        if not db_ok:
+            st.error(f"Cannot connect to the database: {db_message}")
         else:
-            st.info(f"CVE {cve_id} not found in local database. Fetching live data...")
-            st.session_state.perform_live_fetch = True
-        
-        # Perform live data fetch if required
-        if st.session_state.get('perform_live_fetch', False):
-            with st.spinner("Fetching live data from NVD..."):
-                nvd_data = fetch_single_cve_details(cve_id)
+            # Check if this CVE is in our local database first
+            local_data = get_cve_details(cve_id)
+            
+            if local_data:
+                # We found the CVE in our local database
+                st.success(f"Found {cve_id} in local database!")
                 
-                if not nvd_data:
-                    st.error(f"CVE {cve_id} not found in the National Vulnerability Database.")
-                    st.session_state.pop('perform_live_fetch', None)
-                else:
-                    st.success("Data successfully fetched from NVD!")
+                # Display the local data
+                display_cve_details(local_data)
+                
+                # Set up tabs for additional actions
+                tabs = []
+                tab_names = ["Manual Analysis", "Update Data"]
+                
+                # Add exploit search tab if requested
+                if use_github or use_exploitdb:
+                    tab_names.append("Search Exploits")
+                
+                tabs = st.tabs(tab_names)
+                
+                # Tab for manual analysis
+                with tabs[0]:
+                    st.markdown("### Manual Risk Analysis")
+                    st.info("The AI analyzer can help assess the risk of this vulnerability.")
                     
-                    # Prepare for complete analysis by getting EPSS score
+                    if st.button("Analyze with Gemini AI", type="primary"):
+                        with st.spinner("Running AI analysis..."):
+                            try:
+                                # Run the Gemini analysis
+                                analysis_result = asyncio.run(analyze_cve_with_gemini_async(local_data))
+                                
+                                if analysis_result:
+                                    st.success("Analysis completed!")
+                                    
+                                    # Update the database with the analysis results
+                                    update_result = update_cve_priority(cve_id, analysis_result[0], analysis_result[1])
+                                    
+                                    if update_result:
+                                        st.success("Database updated with analysis results")
+                                        
+                                        # Set the session state for saving
+                                        st.session_state.save_attempted = True
+                                        st.session_state.save_success = True
+                                        
+                                        # Rerun to refresh the data shown
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to update database with analysis results")
+                                else:
+                                    st.error("Analysis failed. No results returned.")
+                            except Exception as e:
+                                st.error(f"Error during analysis: {str(e)}")
+                                log_debug(f"Analysis error: {traceback.format_exc()}")
+                
+                # Tab for updating the CVE data
+                with tabs[1]:
+                    st.markdown("### Update CVE Data")
+                    st.info("You can update the CVE data from official sources.")
+                    
+                    # Add buttons for different update options
+                    update_options = st.columns(2)
+                    
+                    with update_options[0]:
+                        if st.button("Update from NVD", type="primary"):
+                            with st.spinner(f"Fetching {cve_id} data from NVD..."):
+                                try:
+                                    nvd_data = fetch_single_cve_details(cve_id)
+                                    if nvd_data:
+                                        # Update the local database with the NVD data
+                                        update_result = store_or_update_cve(nvd_data)
+                                        if update_result:
+                                            st.success("Successfully updated from NVD")
+                                            
+                                            # Set the session state for saving
+                                            st.session_state.save_attempted = True
+                                            st.session_state.save_success = True
+                                            
+                                            # Rerun to refresh the data shown
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to update database with NVD data")
+                                    else:
+                                        st.error(f"Could not find {cve_id} in NVD")
+                                except Exception as e:
+                                    st.error(f"Error updating from NVD: {str(e)}")
+                                    log_debug(f"NVD update error: {traceback.format_exc()}")
+                    
+                    with update_options[1]:
+                        if st.button("Update EPSS Score", type="primary"):
+                            with st.spinner("Fetching EPSS data..."):
+                                try:
+                                    epss_data = get_epss_score(cve_id)
+                                    if epss_data:
+                                        score, percentile = epss_data
+                                        nvd_data['epss_score'] = score
+                                        nvd_data['epss_percentile'] = percentile
+                                        st.info(f"EPSS score: {score:.4f}" if score is not None else "EPSS score not available")
+                                    else:
+                                        st.error(f"Could not find EPSS data for {cve_id}")
+                                except Exception as e:
+                                    st.error(f"Error fetching EPSS data: {str(e)}")
+                                    log_debug(f"EPSS update error: {traceback.format_exc()}")
+                
+                # Tab for exploit search if requested
+                if use_github or use_exploitdb:
+                    with tabs[2]:
+                        st.markdown("### Public Exploit Search")
+                        
+                        with st.spinner(f"Searching for public exploits for {cve_id}..."):
+                            try:
+                                # Find public exploits
+                                exploit_results = []
+                                
+                                if use_github:
+                                    github_exploits = search_github(cve_id)
+                                    if github_exploits:
+                                        exploit_results.extend(github_exploits)
+                                
+                                if use_exploitdb:
+                                    try:
+                                        exploitdb_results = search_exploit_db(cve_id)
+                                        if exploitdb_results:
+                                            exploit_results.extend(exploitdb_results)
+                                    except Exception as ex:
+                                        st.warning(f"Error searching Exploit-DB: {str(ex)}")
+                                
+                                # Display the results
+                                display_exploit_results(cve_id, exploit_results)
+                                
+                                # Update local_data with exploit information
+                                if exploit_results and len(exploit_results) > 0:
+                                    # Make a copy of local_data to avoid modifying the original
+                                    updated_data = local_data.copy()
+                                    updated_data['has_public_exploit'] = True
+                                    updated_data['exploit_references'] = exploit_results
+                                    
+                                    if st.button("Save exploit data to database", key="save_exploit_data"):
+                                        save_result = save_cve_to_database(updated_data)
+                                        if save_result:
+                                            st.success(f"Successfully saved exploit data for {cve_id}")
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to save exploit data to database")
+                            except Exception as e:
+                                st.error(f"Error searching for exploits: {str(e)}")
+                                log_debug(f"Exploit search error: {traceback.format_exc()}")
+                
+                # Display alerts if available
+                if nvd_data and nvd_data.get('alerts'):
+                    st.markdown("## Alerts")
+                    
+                    for alert in nvd_data.get('alerts', []):
+                        alert_html = f"""
+                        <div style="background-color: #856404; color: white; padding: 10px; border-radius: 5px; margin: 5px 0;">{alert}</div>
+                        """
+                        st.markdown(alert_html, unsafe_allow_html=True)
+                
+                # Display public exploit information if available
+                if exploit_results and len(exploit_results) > 0:
+                    st.markdown("### Public Exploits")
+                    st.error(f"⚠️ **{len(exploit_results)} potential exploit(s) found**")
+                    
+                    # Create a dataframe for better display
+                    exploit_data = []
+                    for exploit in exploit_results:
+                        # Extract data
+                        source = exploit.get('source', 'Unknown')
+                        title = exploit.get('title', 'Unknown')
+                        url = exploit.get('url', '#')
+                        exploit_type = exploit.get('type', 'Unknown')
+                        date = exploit.get('date_published', 'Unknown')
+                        # Additional fields specific to GitHub
+                        stars = exploit.get('stars', 'N/A') if 'stars' in exploit else "N/A"
+                        
+                        # Add to data
+                        exploit_data.append({
+                            "Source": source,
+                            "Title": title,
+                            "Type": exploit_type,
+                            "Published": date,
+                            "Stars": stars,
+                            "URL": url
+                        })
+                    
+                    exploit_df = pd.DataFrame(exploit_data)
+                    
+                    # Convert URLs to markdown links
+                    exploit_df['URL'] = exploit_df['URL'].apply(lambda x: f"[View]({x})")
+                    
+                    # Display the dataframe
+                    st.dataframe(exploit_df, use_container_width=True)
+                
+                # Analysis Results section
+                if nvd_data:
+                    st.markdown("## Analysis Results")
+                    st.markdown(f"### {nvd_data.get('cve_id')}")
+                    st.markdown(f"**Source:** Live Data")
+                    
+                    # Description
+                    st.markdown("#### Description")
+                    st.markdown(nvd_data.get('description', 'No description available.'))
+                    
+                    # Metrics in columns
+                    metric_cols = st.columns(4)
+                    with metric_cols[0]:
+                        cvss = nvd_data.get('cvss_v3_score')
+                        st.metric("CVSS Score", f"{cvss:.1f}" if cvss is not None else "N/A")
+                    
+                    with metric_cols[1]:
+                        epss = nvd_data.get('epss_score')
+                        st.metric("EPSS Score", f"{epss:.4f}" if epss is not None else "N/A")
+                    
+                    with metric_cols[2]:
+                        epss_pct = nvd_data.get('epss_percentile')
+                        st.metric("EPSS Percentile", f"{epss_pct:.2f}" if epss_pct is not None else "N/A")
+                    
+                    with metric_cols[3]:
+                        risk = nvd_data.get('risk_score')
+                        st.metric("Risk Score", f"{risk:.2f}" if risk is not None else "N/A")
+                    
+                    # Add save to database option
+                    if st.button("💾 Save to database", type="primary"):
+                        with st.spinner("Saving to database..."):
+                            try:
+                                save_result = save_cve_to_database(nvd_data)
+                                if save_result:
+                                    st.success(f"Successfully saved {cve_id} to the database")
+                                else:
+                                    st.error("Failed to save to database")
+                            except Exception as e:
+                                st.error(f"Error saving to database: {str(e)}")
+            else:
+                # Not in local database, fetch from external sources
+                st.info(f"{cve_id} not found in local database. Fetching live data...")
+                
+                # Collect data from all sources sequentially
+                nvd_data = None
+                exploit_results = []
+                
+                # 1. Fetch from NVD
+                if use_nvd:
+                    with st.spinner(f"Looking up {cve_id} from NVD..."):
+                        nvd_data = fetch_single_cve_details(cve_id)
+                        if nvd_data:
+                            st.success(f"Data successfully fetched from NVD!")
+                        else:
+                            st.error(f"Could not find {cve_id} in NVD database.")
+                            st.stop()  # Stop execution if we can't find the CVE
+                
+                # 2. Fetch EPSS score if NVD data was found
+                if nvd_data:
                     with st.spinner("Fetching EPSS score..."):
-                        epss_score, epss_percentile = get_epss_score(cve_id)
-                        
-                        if epss_score is not None and epss_percentile is not None:
-                            nvd_data['epss_score'] = epss_score
-                            nvd_data['epss_percentile'] = epss_percentile
-                            st.success(f"EPSS score: {epss_score:.4f} (percentile: {epss_percentile:.2f})")
-                        else:
-                            st.warning("Could not retrieve EPSS score for this CVE.")
-                    
-                    # Check if CVE is in CISA KEV catalog
+                        try:
+                            epss_data = get_epss_score(cve_id)
+                            if epss_data:
+                                score, percentile = epss_data
+                                nvd_data['epss_score'] = score
+                                nvd_data['epss_percentile'] = percentile
+                                st.info(f"EPSS score: {score:.4f}" if score is not None else "EPSS score not available")
+                        except Exception as e:
+                            st.error(f"Error fetching EPSS data: {str(e)}")
+                
+                # 3. Check KEV status if NVD data was found
+                if nvd_data:
                     with st.spinner("Checking CISA KEV status..."):
-                        kev_catalog = fetch_kev_catalog()
-                        
-                        if kev_catalog:
-                            is_in_kev, kev_date_added = check_cve_in_kev(cve_id, kev_catalog)
-                            nvd_data['is_in_kev'] = is_in_kev
-                            nvd_data['kev_date_added'] = kev_date_added
-                            
-                            if is_in_kev:
-                                st.warning(f"⚠️ This vulnerability is in the CISA Known Exploited Vulnerabilities catalog! Added on {kev_date_added}")
-                            else:
-                                st.info("This vulnerability is not in the CISA KEV catalog.")
-                        else:
-                            st.warning("Could not check CISA KEV status.")
-                    
-                    # Run Gemini analysis
+                        try:
+                            kev_catalog = fetch_kev_catalog()
+                            if kev_catalog:
+                                is_in_kev, kev_date_added = check_cve_in_kev(cve_id, kev_catalog)
+                                nvd_data['is_in_kev'] = is_in_kev
+                                nvd_data['kev_date_added'] = kev_date_added
+                                
+                                if is_in_kev:
+                                    st.warning(f"This vulnerability is in the CISA Known Exploited Vulnerabilities catalog! Added on {kev_date_added}")
+                        except Exception as e:
+                            st.error(f"Error checking KEV status: {str(e)}")
+                
+                # 4. Run Gemini analysis if NVD data was found
+                if nvd_data:
                     with st.spinner("Analyzing with Gemini AI..."):
                         try:
-                            priority, raw_response = asyncio.run(analyze_cve_with_gemini_async(nvd_data))
-                            nvd_data['gemini_priority'] = priority
-                            nvd_data['gemini_raw_response'] = raw_response
+                            analysis_result = asyncio.run(analyze_cve_with_gemini_async(nvd_data))
                             
-                            priority_colors = {
-                                'HIGH': 'red',
-                                'MEDIUM': 'orange',
-                                'LOW': 'green',
-                                'ERROR_ANALYZING': 'gray'
-                            }
-                            priority_color = priority_colors.get(priority, 'gray')
-                            
-                            # Simplify HTML to avoid rendering issues
-                            priority_html = f'<div style="background-color: {priority_color}; color: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;">Gemini Priority: {priority}</div>'
-                            st.markdown(priority_html, unsafe_allow_html=True)
+                            if analysis_result:
+                                priority, explanation = analysis_result
+                                nvd_data['gemini_priority'] = priority
+                                nvd_data['gemini_raw_response'] = explanation
+                                
+                                # Display priority prominently in a colored box
+                                priority_colors = {
+                                    'HIGH': 'red',
+                                    'MEDIUM': 'orange',
+                                    'LOW': 'green',
+                                    'ERROR_ANALYZING': 'gray'
+                                }
+                                priority_color = priority_colors.get(priority, 'gray')
+                                
+                                st.markdown(f"""
+                                <div style="background-color: {priority_color}; color: white; padding: 15px; border-radius: 5px; text-align: center; margin: 10px 0;">
+                                <span style="font-size: 20px; font-weight: bold;">Gemini Priority: {priority}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
                         except Exception as e:
                             st.error(f"Error analyzing with Gemini: {str(e)}")
-                            nvd_data['gemini_priority'] = "ERROR_ANALYZING"
-                    
-                    # Calculate risk score
+                
+                # 5. Calculate risk score if NVD data was found
+                if nvd_data:
                     with st.spinner("Calculating risk score..."):
                         try:
                             risk_score, alerts = analyze_cve_risk(nvd_data)
-                            nvd_data['risk_score'] = risk_score
-                            nvd_data['alerts'] = alerts
-                            
                             if risk_score is not None:
-                                st.success(f"Risk score: {risk_score:.2f}")
-                                if alerts:
-                                    st.warning(f"{len(alerts)} alerts generated")
+                                nvd_data['risk_score'] = risk_score
+                                nvd_data['alerts'] = alerts
+                                
+                                st.info(f"Risk score: {risk_score:.2f}")
                         except Exception as e:
                             st.error(f"Error calculating risk score: {str(e)}")
-                    
-                    # Display full details
-                    display_cve_details(nvd_data, "National Vulnerability Database (Live)")
-                    
-                    # Option to save to database
-                    save_col1, save_col2 = st.columns([1, 4])
-                    with save_col1:
-                        if st.button("💾 Save to Database", type="primary"):
-                            log_debug(f"Save button clicked for CVE {cve_id}")
-                            log_debug(f"[LIVE_LOOKUP] Data to be saved for {cve_id}: {nvd_data}")
+                
+                # 6. Search for exploits if requested
+                if nvd_data and (use_github or use_exploitdb):
+                    with st.spinner(f"Searching for public exploits for {cve_id}..."):
+                        try:
+                            exploit_results = []
                             
-                            with st.spinner("Saving to database..."):
-                                save_result = save_cve_to_database(nvd_data)
-                                log_debug(f"[LIVE_LOOKUP] save_cve_to_database returned: {save_result} for {cve_id}") # YENİ LOG
-                                log_debug(f"[LIVE_LOOKUP] Session state after save attempt: save_attempted={st.session_state.save_attempted}, save_success={st.session_state.save_success}") # YENİ LOG
-
-
-                                if save_result:
-                                    st.success("✅ CVE successfully saved to database!", icon="✅")
-                                    log_debug("CVE successfully saved to database")
-                                    
-                                    # Add details about saved data
-                                    with save_col2:
-                                        st.info(f"Saved at: {nvd_data['processed_at']}")
-                                else:
-                                    st.error("❌ Failed to save CVE to database. See logs for details.", icon="❌")
-                                    log_debug("Failed to save CVE to database")
-                                    
-                                    # Show debug info
-                                    with save_col2:
-                                        # Database status check
-                                        db_ok, db_message = check_database_connection()
-                                        status_color = "green" if db_ok else "red"
-                                        st.markdown(f"Database status: <span style='color:{status_color};'>{db_message}</span>", unsafe_allow_html=True)
-                                        
-                                        # Add verify button
-                                        if st.button("🔍 Verify Database"):
-                                            verification_data = get_cve_details(cve_id)
-                                            if verification_data:
-                                                st.success(f"CVE {cve_id} found in database!")
-                                                st.write(f"Last updated: {verification_data.get('processed_at', 'Unknown')}")
-                                            else:
-                                                st.error(f"CVE {cve_id} NOT found in database!")
+                            if use_github:
+                                github_exploits = search_github(cve_id)
+                                if github_exploits:
+                                    exploit_results.extend(github_exploits)
+                            
+                            if use_exploitdb:
+                                try:
+                                    exploitdb_results = search_exploit_db(cve_id)
+                                    if exploitdb_results:
+                                        exploit_results.extend(exploitdb_results)
+                                except Exception as ex:
+                                    st.warning(f"Error searching Exploit-DB: {str(ex)}")
+                            
+                            if exploit_results and len(exploit_results) > 0:
+                                nvd_data['has_public_exploit'] = True
+                                nvd_data['exploit_references'] = exploit_results
+                                st.warning(f"⚠️ **{len(exploit_results)} potential exploit(s) found**")
+                                
+                                # Display exploit results
+                                display_exploit_results(cve_id, exploit_results)
+                        except Exception as e:
+                            st.error(f"Error searching for exploits: {str(e)}")
+                
+                # 7. Display details and save option
+                if nvd_data:
+                    # Display detailed results
+                    st.markdown("## Analysis Results")
+                    display_cve_details(nvd_data, source="Live Data")
                     
-                    # Clear the fetch flag to allow new searches
-                    st.session_state.pop('perform_live_fetch', None)
+                    # Add save to database option
+                    if st.button("💾 Save to database", type="primary"):
+                        with st.spinner("Saving to database..."):
+                            try:
+                                save_result = save_cve_to_database(nvd_data)
+                                if save_result:
+                                    st.success(f"Successfully saved {cve_id} to the database")
+                                else:
+                                    st.error("Failed to save to database")
+                            except Exception as e:
+                                st.error(f"Error saving to database: {str(e)}")
+                else:
+                    st.error(f"Could not find {cve_id} in NVD database or an error occurred.")
 
 # Display saved CVE information
 if st.session_state.save_attempted and st.session_state.save_success and st.session_state.saved_cve_data:

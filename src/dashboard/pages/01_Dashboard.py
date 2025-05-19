@@ -89,6 +89,19 @@ if kev_filter == "Only KEV":
 elif kev_filter == "Exclude KEV":
     is_in_kev = False
 
+# Public Exploit filter
+exploit_filter = st.sidebar.radio(
+    "Public Exploit Status",
+    options=["All", "Only with Exploits", "Exclude Exploits"],
+    index=0
+)
+
+has_public_exploit = None
+if exploit_filter == "Only with Exploits":
+    has_public_exploit = True
+elif exploit_filter == "Exclude Exploits":
+    has_public_exploit = False
+
 # Microsoft severity filter
 ms_severity_filter = st.sidebar.selectbox(
     "Microsoft Severity",
@@ -121,6 +134,7 @@ if 'cve_data' not in st.session_state or apply_filters:
             epss_min=epss_min,
             epss_max=epss_max,
             is_in_kev=is_in_kev,
+            has_public_exploit=has_public_exploit,
             keyword=keyword if keyword else None,
             microsoft_severity=microsoft_severity,
             microsoft_product=ms_product_filter if ms_product_filter else None
@@ -143,7 +157,7 @@ if 'kev_date_added' in df.columns:
 
 # --- Metrics Section ---
 st.subheader("Summary Metrics")
-metrics_cols = st.columns(4)
+metrics_cols = st.columns(5)
 
 with metrics_cols[0]:
     st.metric("Total Vulnerabilities", len(df))
@@ -158,12 +172,17 @@ with metrics_cols[2]:
     st.metric("In CISA KEV", kev_count, delta=f"{kev_count/len(df)*100:.1f}%" if len(df) > 0 else "0%", delta_color="off")
     
 with metrics_cols[3]:
+    # Add public exploit count metric
+    exploit_count = int(df['has_public_exploit'].sum())
+    st.metric("Public Exploits", exploit_count, delta=f"{exploit_count/len(df)*100:.1f}%" if len(df) > 0 else "0%", delta_color="off")
+
+with metrics_cols[4]:
     avg_risk = df['risk_score'].mean()
     st.metric("Avg Risk Score", f"{avg_risk:.2f}" if not pd.isna(avg_risk) else "N/A")
 
 # --- Priority Distribution ---
 st.subheader("Priority Distribution")
-priority_cols = st.columns(2)
+priority_cols = st.columns(3)
 
 with priority_cols[0]:
     priority_counts = df['gemini_priority'].value_counts().reset_index()
@@ -181,10 +200,27 @@ with priority_cols[0]:
         hole=0.4
     )
     fig_priority.update_traces(textposition='inside', textinfo='percent+label')
-    fig_priority.update_layout(height=300)
+    fig_priority.update_layout(height=300, title="Priority Levels")
     st.plotly_chart(fig_priority, use_container_width=True)
 
 with priority_cols[1]:
+    # Add a new visualization for exploit vs non-exploit CVEs
+    exploit_status = df['has_public_exploit'].map({True: 'Has Exploit', False: 'No Exploit'}).value_counts().reset_index()
+    exploit_status.columns = ['Status', 'Count']
+    
+    fig_exploits = px.pie(
+        exploit_status,
+        values='Count',
+        names='Status',
+        color='Status',
+        color_discrete_map={'Has Exploit': '#ff4b4b', 'No Exploit': '#4b4bff'},
+        hole=0.4
+    )
+    fig_exploits.update_traces(textposition='inside', textinfo='percent+label')
+    fig_exploits.update_layout(height=300, title="Public Exploit Availability")
+    st.plotly_chart(fig_exploits, use_container_width=True)
+
+with priority_cols[2]:
     # CVEs Over Time
     # Filter to only include valid datetime values before grouping
     df_date_valid = df.dropna(subset=['published_date'])
@@ -197,7 +233,8 @@ with priority_cols[1]:
             df_by_date, 
             x='Date', 
             y='CVEs',
-            markers=True
+            markers=True,
+            title="CVEs Over Time"
         )
         fig_timeline.update_layout(height=300)
         st.plotly_chart(fig_timeline, use_container_width=True)
@@ -507,12 +544,17 @@ st.markdown("""
 
 # Display the table with pagination
 page_size = 10
-total_pages = len(display_df) // page_size + (1 if len(display_df) % page_size > 0 else 0)
+total_pages = max(1, len(display_df) // page_size + (1 if len(display_df) % page_size > 0 else 0))
 
-if total_pages > 0:
+if len(display_df) > 0:
     page_col1, page_col2, page_col3 = st.columns([1, 3, 1])
     with page_col2:
-        page_number = st.slider('Page', 1, total_pages, 1)
+        # Only show the slider if we have more than one page
+        if total_pages > 1:
+            page_number = st.slider('Page', 1, total_pages, 1)
+        else:
+            page_number = 1
+            st.text('Page 1 of 1')
     
     start_idx = (page_number - 1) * page_size
     end_idx = min(start_idx + page_size, len(display_df))
@@ -597,6 +639,148 @@ if selected_cve:
         elif not is_kev:
             st.info("No specific alerts for this vulnerability")
 
+# Top CVSS Vulnerabilities Table
+top_cvss = df.sort_values(by='cvss_v3_score', ascending=False).head(5)
+if not top_cvss.empty:
+    st.subheader("Top CVSS Score Vulnerabilities")
+    
+    # Format the table
+    formatted_top_cvss = top_cvss[['cve_id', 'cvss_v3_score', 'gemini_priority', 'risk_score']].copy()
+    
+    # Format the columns
+    formatted_top_cvss['cve_id'] = formatted_top_cvss['cve_id'].apply(
+        lambda x: f"<a href='./Detailed_Analysis?selected_cve={x}' target='_self'>{x}</a>"
+    )
+    formatted_top_cvss['cvss_v3_score'] = formatted_top_cvss['cvss_v3_score'].apply(lambda x: f"{x:.1f}")
+    formatted_top_cvss['risk_score'] = formatted_top_cvss['risk_score'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A")
+    
+    # Rename the columns for display
+    formatted_top_cvss.columns = ['CVE ID', 'CVSS Score', 'Priority', 'Risk Score']
+    
+    # Display with HTML formatting to enable clickable links
+    st.markdown(
+        formatted_top_cvss.to_html(escape=False, index=False),
+        unsafe_allow_html=True
+    )
+
+# Public Exploits Section
+st.markdown("---")
+st.subheader("🚨 Vulnerabilities with Public Exploits")
+
+# Filter the DataFrame for CVEs with public exploits
+exploitable_cves = df[df['has_public_exploit'] == True].sort_values(by=['risk_score', 'cvss_v3_score'], ascending=False)
+
+if not exploitable_cves.empty:
+    # Create two columns - one for metrics and one for the table
+    exploit_cols = st.columns([1, 3])
+    
+    with exploit_cols[0]:
+        # Display metrics about exploitable CVEs
+        st.metric("Total Exploitable", len(exploitable_cves))
+        
+        high_risk_exploitable = len(exploitable_cves[exploitable_cves['risk_score'] >= 0.7])
+        st.metric("High Risk & Exploitable", high_risk_exploitable, 
+                 delta=f"{high_risk_exploitable/len(exploitable_cves)*100:.1f}%" if len(exploitable_cves) > 0 else "0%", 
+                 delta_color="off")
+        
+        # Count high priority and exploitable
+        high_priority_exploitable = len(exploitable_cves[exploitable_cves['gemini_priority'] == 'HIGH'])
+        st.metric("High Priority & Exploitable", high_priority_exploitable,
+                 delta=f"{high_priority_exploitable/len(exploitable_cves)*100:.1f}%" if len(exploitable_cves) > 0 else "0%",
+                 delta_color="off")
+        
+        # Also in KEV
+        kev_and_exploitable = len(exploitable_cves[exploitable_cves['is_in_kev'] == True])
+        st.metric("In KEV & Exploitable", kev_and_exploitable,
+                 delta=f"{kev_and_exploitable/len(exploitable_cves)*100:.1f}%" if len(exploitable_cves) > 0 else "0%",
+                 delta_color="off")
+    
+    with exploit_cols[1]:
+        # Display a table of top exploitable CVEs
+        st.markdown("#### Critical Vulnerabilities with Public Exploits")
+        
+        # Get top 10 exploitable CVEs based on risk score
+        top_exploitable = exploitable_cves.head(10)
+        
+        # Format the table
+        formatted_exploitable = top_exploitable[['cve_id', 'cvss_v3_score', 'gemini_priority', 'risk_score', 'is_in_kev']].copy()
+        
+        # Format the columns
+        formatted_exploitable['cve_id'] = formatted_exploitable['cve_id'].apply(
+            lambda x: f"<a href='./Detailed_Analysis?selected_cve={x}' target='_self'>{x}</a>"
+        )
+        formatted_exploitable['cvss_v3_score'] = formatted_exploitable['cvss_v3_score'].apply(lambda x: f"{x:.1f}")
+        formatted_exploitable['risk_score'] = formatted_exploitable['risk_score'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A")
+        formatted_exploitable['is_in_kev'] = formatted_exploitable['is_in_kev'].apply(lambda x: "✓" if x else "")
+        
+        # Rename the columns for display
+        formatted_exploitable.columns = ['CVE ID', 'CVSS Score', 'Priority', 'Risk Score', 'In KEV']
+        
+        # Display with HTML formatting to enable clickable links
+        st.markdown(
+            formatted_exploitable.to_html(escape=False, index=False),
+            unsafe_allow_html=True
+        )
+        
+        # Add note about exploitable vulnerabilities
+        st.markdown("""
+        <div style="background-color: #ffcccb; padding: 10px; border-radius: 5px; margin-top: 10px;">
+            <strong>⚠️ Warning:</strong> These vulnerabilities have publicly available exploits and should be prioritized for patching.
+            Click on any CVE ID to view detailed information, including links to the exploits.
+        </div>
+        """, unsafe_allow_html=True)
+else:
+    st.info("No vulnerabilities with public exploits found in the current filtered set.")
+
 # Add footer with timestamp
 st.markdown("---")
-st.markdown(f"*Dashboard refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*") 
+st.markdown(f"*Dashboard refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+
+# Add a live search feature in the sidebar
+st.sidebar.markdown("---")
+st.sidebar.header("🔍 Live Exploit Search")
+
+with st.sidebar.form("exploit_search_form"):
+    search_cve = st.text_input("Enter CVE ID", placeholder="e.g., CVE-2021-44228")
+    search_submitted = st.form_submit_button("Search GitHub")
+
+if search_submitted and search_cve:
+    # Validate CVE format
+    if not search_cve.startswith("CVE-") or len(search_cve.split("-")) != 3:
+        st.sidebar.error("Please enter a valid CVE ID (e.g., CVE-2021-44228)")
+    else:
+        with st.sidebar.spinner(f"Searching for {search_cve}..."):
+            try:
+                # Import necessary modules
+                import sys
+                import os
+                # Add the project root to the path
+                sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+                
+                from src.clients.exploit_search_client import search_github
+                
+                # Search for exploits on GitHub
+                exploits = search_github(search_cve)
+                
+                # Display results
+                if exploits and len(exploits) > 0:
+                    st.sidebar.warning(f"Found {len(exploits)} potential exploit(s)!")
+                    
+                    # Show in expander to save space
+                    with st.sidebar.expander("View Results", expanded=True):
+                        for i, exploit in enumerate(exploits[:5]):  # Limit to 5 to avoid sidebar overflow
+                            st.markdown(f"**{exploit.get('title', 'Unknown')}**")
+                            st.markdown(f"Type: {exploit.get('type', 'Unknown')}")
+                            st.markdown(f"[View on GitHub]({exploit.get('url', '#')})")
+                            
+                            if i < min(len(exploits), 5) - 1:
+                                st.markdown("---")
+                        
+                        if len(exploits) > 5:
+                            st.info(f"{len(exploits) - 5} more results not shown. Visit Detailed Analysis for full results.")
+                else:
+                    st.sidebar.success("No exploits found on GitHub.")
+                
+            except Exception as e:
+                st.sidebar.error(f"Error searching: {str(e)}")
+                st.sidebar.info("Make sure GitHub token is configured.") 

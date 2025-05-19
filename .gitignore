@@ -32,4 +32,10 @@ secrets.json
 
 # IDE files
 .idea/
-.vscode/ 
+.vscode/
+
+# Docker
+.docker/
+docker-data/
+*.dockerfile.bak
+.dockerignore.bak 

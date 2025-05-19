@@ -78,7 +78,7 @@ if df.empty:
     st.stop()
 
 # Create tabs for different analyses
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Temporal Analysis", "Priority Analysis", "KEV Analysis", "Risk Distribution", "Microsoft Analysis"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Temporal Analysis", "Priority Analysis", "KEV Analysis", "Risk Distribution", "Exploit Analysis", "Microsoft Analysis"])
 
 # Temporal Analysis Tab
 with tab1:
@@ -487,9 +487,246 @@ with tab4:
     else:
         st.info("Risk score data is not available.")
 
-# Microsoft Analysis Tab
+# Exploit Analysis Tab
 with tab5:
-    st.subheader("Microsoft Patch Tuesday Analysis")
+    st.subheader("Exploit Availability Analysis")
+    
+    # Exploitable vulnerabilities metrics
+    exploit_metrics_cols = st.columns(4)
+    
+    with exploit_metrics_cols[0]:
+        exploit_count = int(df['has_public_exploit'].sum())
+        total_count = len(df)
+        exploit_percentage = (exploit_count / total_count) * 100 if total_count > 0 else 0
+        
+        st.metric(
+            "CVEs with Public Exploits", 
+            f"{exploit_count} ({exploit_percentage:.1f}%)",
+            help="Number and percentage of vulnerabilities with publicly available exploits"
+        )
+    
+    with exploit_metrics_cols[1]:
+        high_with_exploit = int(df[(df['gemini_priority'] == 'HIGH') & (df['has_public_exploit'] == True)].shape[0])
+        high_count = int(df[df['gemini_priority'] == 'HIGH'].shape[0])
+        high_exploit_percentage = (high_with_exploit / high_count) * 100 if high_count > 0 else 0
+        
+        st.metric(
+            "HIGH Priority with Exploits",
+            f"{high_with_exploit} ({high_exploit_percentage:.1f}%)",
+            help="Number and percentage of HIGH priority vulnerabilities with public exploits"
+        )
+        
+    with exploit_metrics_cols[2]:
+        kev_with_exploit = int(df[(df['is_in_kev'] == True) & (df['has_public_exploit'] == True)].shape[0])
+        kev_count = int(df[df['is_in_kev'] == True].shape[0])
+        kev_exploit_percentage = (kev_with_exploit / kev_count) * 100 if kev_count > 0 else 0
+        
+        st.metric(
+            "KEV Entries with Exploits",
+            f"{kev_with_exploit} ({kev_exploit_percentage:.1f}%)",
+            help="Number and percentage of CISA KEV entries with public exploits"
+        )
+    
+    with exploit_metrics_cols[3]:
+        avg_risk_with_exploit = df[df['has_public_exploit'] == True]['risk_score'].mean()
+        avg_risk_no_exploit = df[df['has_public_exploit'] == False]['risk_score'].mean()
+        risk_diff = avg_risk_with_exploit - avg_risk_no_exploit
+        
+        st.metric(
+            "Avg Risk Score with Exploits",
+            f"{avg_risk_with_exploit:.2f}",
+            delta=f"{risk_diff:+.2f} vs no exploits",
+            help="Average risk score for vulnerabilities with public exploits vs. those without"
+        )
+    
+    # Priority distribution for exploitable vs non-exploitable vulnerabilities
+    st.subheader("Priority Distribution: Exploitable vs Non-Exploitable")
+    
+    # Create a DataFrame for priority distribution
+    priority_exploit_df = pd.DataFrame({
+        'With Exploit': df[df['has_public_exploit'] == True]['gemini_priority'].value_counts(),
+        'Without Exploit': df[df['has_public_exploit'] == False]['gemini_priority'].value_counts()
+    }).fillna(0).astype(int)
+    
+    # Ensure all priorities are represented
+    for priority in ['HIGH', 'MEDIUM', 'LOW']:
+        if priority not in priority_exploit_df.index:
+            priority_exploit_df.loc[priority] = [0, 0]
+    
+    # Sort by priority
+    priority_order = ['HIGH', 'MEDIUM', 'LOW']
+    priority_exploit_df = priority_exploit_df.reindex(priority_order)
+    
+    # Convert to percentage for better comparison
+    priority_exploit_pct = priority_exploit_df.copy()
+    priority_exploit_pct['With Exploit'] = (priority_exploit_pct['With Exploit'] / priority_exploit_pct['With Exploit'].sum() * 100 if priority_exploit_pct['With Exploit'].sum() > 0 else 0)
+    priority_exploit_pct['Without Exploit'] = (priority_exploit_pct['Without Exploit'] / priority_exploit_pct['Without Exploit'].sum() * 100 if priority_exploit_pct['Without Exploit'].sum() > 0 else 0)
+    
+    # Create two columns for the charts
+    exploit_chart_cols = st.columns(2)
+    
+    with exploit_chart_cols[0]:
+        # Create a grouped bar chart for counts
+        fig = px.bar(
+            priority_exploit_df.reset_index(),
+            x='gemini_priority',
+            y=['With Exploit', 'Without Exploit'],
+            barmode='group',
+            color_discrete_map={'With Exploit': '#ff4b4b', 'Without Exploit': '#4b4bff'},
+            title="Priority Distribution (Count)"
+        )
+        fig.update_layout(
+            xaxis_title="Priority Level",
+            yaxis_title="Number of CVEs",
+            legend_title="Exploit Status"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with exploit_chart_cols[1]:
+        # Create a grouped bar chart for percentages
+        fig = px.bar(
+            priority_exploit_pct.reset_index(),
+            x='gemini_priority',
+            y=['With Exploit', 'Without Exploit'],
+            barmode='group',
+            color_discrete_map={'With Exploit': '#ff4b4b', 'Without Exploit': '#4b4bff'},
+            title="Priority Distribution (Percentage)"
+        )
+        fig.update_layout(
+            xaxis_title="Priority Level",
+            yaxis_title="Percentage",
+            legend_title="Exploit Status"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Exploits over time analysis
+    st.subheader("Exploits Availability Over Time")
+    
+    # Only analyze if we have enough data
+    if not df.empty and 'published_date' in df.columns:
+        # Group by time period
+        df_exploit_ts = df.copy()
+        
+        if period_type == 'Monthly':
+            # Only perform operations on rows with valid published_date
+            df_exploit_ts_valid = df_exploit_ts.dropna(subset=['published_date'])
+            if not df_exploit_ts_valid.empty:
+                df_exploit_ts_valid['period'] = df_exploit_ts_valid['published_date'].dt.to_period('M')
+                df_exploit_ts_valid['has_exploit'] = df_exploit_ts_valid['has_public_exploit'].map({True: 'With Exploit', False: 'Without Exploit'})
+                
+                # Group by period and exploit status
+                exploit_ts = df_exploit_ts_valid.groupby(['period', 'has_exploit']).size().reset_index(name='count')
+                exploit_ts['period_start'] = exploit_ts['period'].dt.start_time
+                
+                # Create a line chart
+                fig = px.line(
+                    exploit_ts,
+                    x='period_start',
+                    y='count',
+                    color='has_exploit',
+                    markers=True,
+                    color_discrete_map={'With Exploit': '#ff4b4b', 'Without Exploit': '#4b4bff'},
+                    title=f"{period_type} Trend of Exploitable Vulnerabilities"
+                )
+                fig.update_layout(
+                    xaxis_title="Date",
+                    yaxis_title="Number of CVEs",
+                    legend_title="Exploit Status"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Calculate and show the percentage of exploitable vulnerabilities over time
+                period_totals = df_exploit_ts_valid.groupby('period').size()
+                exploits_by_period = df_exploit_ts_valid[df_exploit_ts_valid['has_public_exploit'] == True].groupby('period').size()
+                
+                # Calculate percentage
+                percentage_df = pd.DataFrame({
+                    'total': period_totals,
+                    'with_exploit': exploits_by_period
+                }).fillna(0)
+                
+                percentage_df['percentage'] = (percentage_df['with_exploit'] / percentage_df['total'] * 100)
+                percentage_df = percentage_df.reset_index()
+                percentage_df['period_start'] = percentage_df['period'].dt.start_time
+                
+                # Create a line chart for percentages
+                fig = px.line(
+                    percentage_df,
+                    x='period_start',
+                    y='percentage',
+                    markers=True,
+                    color_discrete_sequence=['#ff4b4b'],
+                    title=f"{period_type} Percentage of Vulnerabilities with Exploits"
+                )
+                fig.update_layout(
+                    xaxis_title="Date",
+                    yaxis_title="Percentage with Exploits (%)",
+                    yaxis=dict(range=[0, 100])
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Insufficient data for temporal analysis of exploits. Try extending the date range.")
+    
+    # Add common exploit sources analysis
+    if not df.empty and any(df['has_public_exploit']):
+        st.subheader("Exploit Sources Analysis")
+        
+        # Try to extract exploit sources from the exploit_references column
+        exploit_sources = []
+        
+        for _, row in df[df['has_public_exploit'] == True].iterrows():
+            exploit_refs = row.get('exploit_references')
+            
+            try:
+                # If it's a string, try to parse as JSON
+                if isinstance(exploit_refs, str):
+                    import json
+                    exploit_refs = json.loads(exploit_refs)
+                
+                # Extract sources from the list of exploits
+                if isinstance(exploit_refs, list):
+                    for exploit in exploit_refs:
+                        if isinstance(exploit, dict) and 'source' in exploit:
+                            exploit_sources.append(exploit['source'])
+            except:
+                # If parsing fails, ignore
+                pass
+        
+        # Count the sources
+        if exploit_sources:
+            source_counts = Counter(exploit_sources)
+            source_df = pd.DataFrame({
+                'Source': list(source_counts.keys()),
+                'Count': list(source_counts.values())
+            }).sort_values('Count', ascending=False)
+            
+            # Create a bar chart
+            fig = px.bar(
+                source_df,
+                x='Source',
+                y='Count',
+                color='Count',
+                color_continuous_scale='Reds',
+                title="Exploit Sources Distribution"
+            )
+            fig.update_layout(
+                xaxis_title="Source",
+                yaxis_title="Number of Exploits",
+                xaxis_tickangle=-45
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No detailed exploit source information available in the data.")
+    
+    # Add insight box
+    st.info("""
+    **Insight**: Vulnerabilities with public exploits typically present a higher risk as they are more likely to be targeted by attackers.
+    Organizations should prioritize patching vulnerabilities with public exploits, especially those that are also high priority or listed in the CISA KEV catalog.
+    """)
+
+# Microsoft Analysis Tab
+with tab6:
+    st.subheader("Microsoft Vulnerability Analysis")
     
     # Filter only CVEs with Microsoft data
     ms_df = df.dropna(subset=['patch_tuesday_date', 'microsoft_severity']).copy()

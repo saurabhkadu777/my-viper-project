@@ -65,7 +65,9 @@ def initialize_db():
             microsoft_product_family TEXT,
             microsoft_product_name TEXT,
             microsoft_severity TEXT,
-            patch_tuesday_date TEXT
+            patch_tuesday_date TEXT,
+            has_public_exploit INTEGER DEFAULT 0,
+            exploit_references TEXT
         )
         ''')
         
@@ -110,6 +112,15 @@ def initialize_db():
         if 'patch_tuesday_date' not in columns:
             logger.debug("Adding patch_tuesday_date column to cves table")
             cursor.execute("ALTER TABLE cves ADD COLUMN patch_tuesday_date TEXT")
+        
+        # Check if we need to add the exploit-related columns
+        if 'has_public_exploit' not in columns:
+            logger.debug("Adding has_public_exploit column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN has_public_exploit INTEGER DEFAULT 0")
+        
+        if 'exploit_references' not in columns:
+            logger.debug("Adding exploit_references column to cves table")
+            cursor.execute("ALTER TABLE cves ADD COLUMN exploit_references TEXT")
         
         conn.commit()
         logger.debug("Database initialized successfully")
@@ -184,7 +195,7 @@ def get_unprocessed_cves():
         cursor.execute('''
         SELECT id, cve_id, description, cvss_v3_score, published_date, epss_score, epss_percentile, 
                is_in_kev, kev_date_added, microsoft_severity, microsoft_product_family,
-               microsoft_product_name, patch_tuesday_date
+               microsoft_product_name, patch_tuesday_date, has_public_exploit, exploit_references
         FROM cves
         WHERE gemini_priority IS NULL
         ''')
@@ -192,6 +203,14 @@ def get_unprocessed_cves():
         rows = cursor.fetchall()
         unprocessed_cves = []
         for row in rows:
+            # Parse exploit_references JSON if available
+            exploit_refs = None
+            if row['exploit_references']:
+                try:
+                    exploit_refs = json.loads(row['exploit_references'])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in exploit_references for {row['cve_id']}")
+            
             unprocessed_cves.append({
                 'id': row['id'],
                 'cve_id': row['cve_id'],
@@ -205,7 +224,9 @@ def get_unprocessed_cves():
                 'microsoft_severity': row['microsoft_severity'],
                 'microsoft_product_family': row['microsoft_product_family'],
                 'microsoft_product_name': row['microsoft_product_name'],
-                'patch_tuesday_date': row['patch_tuesday_date']
+                'patch_tuesday_date': row['patch_tuesday_date'],
+                'has_public_exploit': bool(row['has_public_exploit']),
+                'exploit_references': exploit_refs
             })
         
         logger.debug(f"Found {len(unprocessed_cves)} unprocessed CVEs")
@@ -467,8 +488,6 @@ def get_cves_with_alerts():
                     alerts = json.loads(alerts_json)
                 except json.JSONDecodeError:
                     alerts = []
-            else:
-                alerts = []
                 
             cves_with_alerts.append({
                 'cve_id': row['cve_id'],
@@ -580,7 +599,7 @@ def get_all_cves_with_details() -> List[Dict[str, Any]]:
         SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
                processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
                risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
-               microsoft_severity, patch_tuesday_date
+               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references
         FROM cves
         WHERE gemini_priority IS NOT NULL
         ORDER BY 
@@ -625,7 +644,9 @@ def get_all_cves_with_details() -> List[Dict[str, Any]]:
                 'microsoft_product_family': row['microsoft_product_family'],
                 'microsoft_product_name': row['microsoft_product_name'],
                 'microsoft_severity': row['microsoft_severity'],
-                'patch_tuesday_date': row['patch_tuesday_date']
+                'patch_tuesday_date': row['patch_tuesday_date'],
+                'has_public_exploit': bool(row['has_public_exploit']),
+                'exploit_references': row['exploit_references']
             })
         
         logger.debug(f"Fetched {len(all_cves)} CVEs with details for dashboard")
@@ -647,6 +668,7 @@ def get_filtered_cves(
     epss_min: Optional[float] = None,
     epss_max: Optional[float] = None,
     is_in_kev: Optional[bool] = None,
+    has_public_exploit: Optional[bool] = None,
     keyword: Optional[str] = None,
     microsoft_severity: Optional[str] = None,
     microsoft_product: Optional[str] = None
@@ -663,6 +685,7 @@ def get_filtered_cves(
         epss_min (float, optional): Minimum EPSS score.
         epss_max (float, optional): Maximum EPSS score.
         is_in_kev (bool, optional): Filter for CVEs in the CISA KEV catalog.
+        has_public_exploit (bool, optional): Filter for CVEs with public exploits.
         keyword (str, optional): Keyword to search in the description.
         microsoft_severity (str, optional): Filter by Microsoft severity rating.
         microsoft_product (str, optional): Filter by Microsoft product family.
@@ -681,7 +704,7 @@ def get_filtered_cves(
         SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
                processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
                risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
-               microsoft_severity, patch_tuesday_date
+               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references
         FROM cves
         WHERE 1=1
         '''
@@ -722,6 +745,10 @@ def get_filtered_cves(
         if is_in_kev is not None:
             query += " AND is_in_kev = ?"
             params.append(1 if is_in_kev else 0)
+        
+        if has_public_exploit is not None:
+            query += " AND has_public_exploit = ?"
+            params.append(1 if has_public_exploit else 0)
         
         if keyword:
             query += " AND description LIKE ?"
@@ -782,7 +809,9 @@ def get_filtered_cves(
                 'microsoft_product_family': row['microsoft_product_family'],
                 'microsoft_product_name': row['microsoft_product_name'],
                 'microsoft_severity': row['microsoft_severity'],
-                'patch_tuesday_date': row['patch_tuesday_date']
+                'patch_tuesday_date': row['patch_tuesday_date'],
+                'has_public_exploit': bool(row['has_public_exploit']),
+                'exploit_references': row['exploit_references']
             })
         
         logger.debug(f"Fetched {len(filtered_cves)} CVEs with applied filters")
@@ -875,7 +904,7 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
         SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority, 
                processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added, 
                risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
-               microsoft_severity, patch_tuesday_date
+               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references
         FROM cves
         WHERE cve_id = ?
         ''', (cve_id,))
@@ -896,6 +925,28 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
         else:
             alerts = []
         
+        # Extract references if stored as JSON
+        references = []
+        if row['gemini_raw_response']:
+            try:
+                # Try to extract references from the Gemini response
+                gemini_data = json.loads(row['gemini_raw_response'])
+                if 'references' in gemini_data:
+                    references = gemini_data['references']
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, ignore references
+                pass
+        
+        # Extract CPE entries if stored in Gemini response
+        cpe_entries = []
+        if row['gemini_raw_response']:
+            try:
+                gemini_data = json.loads(row['gemini_raw_response'])
+                if 'cpe_entries' in gemini_data:
+                    cpe_entries = gemini_data['cpe_entries']
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
         # Convert to dictionary
         cve_data = {
             'cve_id': row['cve_id'],
@@ -914,7 +965,10 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
             'microsoft_product_family': row['microsoft_product_family'],
             'microsoft_product_name': row['microsoft_product_name'],
             'microsoft_severity': row['microsoft_severity'],
-            'patch_tuesday_date': row['patch_tuesday_date']
+            'patch_tuesday_date': row['patch_tuesday_date'],
+            'has_public_exploit': bool(row['has_public_exploit']),
+            'exploit_references': references,
+            'cpe_entries': cpe_entries
         }
         
         logger.debug(f"Found CVE details for {cve_id}")
@@ -1085,6 +1139,19 @@ def store_or_update_cve(cve_data):
                 update_fields.append('patch_tuesday_date = ?')
                 update_values.append(cve_data['patch_tuesday_date'])
             
+            if 'has_public_exploit' in cve_data:
+                update_fields.append('has_public_exploit = ?')
+                update_values.append(1 if cve_data['has_public_exploit'] else 0)
+                
+            if 'exploit_references' in cve_data:
+                update_fields.append('exploit_references = ?')
+                try:
+                    update_values.append(json.dumps(cve_data['exploit_references']))
+                except Exception as e:
+                    log_to_file(f"Error serializing exploit_references to JSON: {str(e)}")
+                    # Use a string representation as fallback
+                    update_values.append(str(cve_data['exploit_references']))
+            
             if not update_fields:
                 logger.warning(f"No fields to update for CVE {cve_id}")
                 return True  # No error, just nothing to update
@@ -1175,6 +1242,19 @@ def store_or_update_cve(cve_data):
                 fields.append('patch_tuesday_date')
                 values.append(cve_data.get('patch_tuesday_date'))
             
+            if 'has_public_exploit' in cve_data:
+                fields.append('has_public_exploit')
+                values.append(1 if cve_data.get('has_public_exploit') else 0)
+                
+            if 'exploit_references' in cve_data:
+                fields.append('exploit_references')
+                try:
+                    values.append(json.dumps(cve_data.get('exploit_references', [])))
+                except Exception as e:
+                    log_to_file(f"Error serializing exploit_references to JSON: {str(e)}")
+                    # Use a string representation as fallback
+                    values.append(str(cve_data.get('exploit_references', [])))
+            
             # Construct and execute insert query
             placeholders = ', '.join(['?' for _ in fields])
             insert_query = f"INSERT INTO cves ({', '.join(fields)}) VALUES ({placeholders})"
@@ -1219,3 +1299,52 @@ def store_or_update_cve(cve_data):
                 log_to_file("Database connection closed")
             except Exception as e:
                 log_to_file(f"Error closing connection: {str(e)}") 
+
+def update_cve_exploit_data(cve_id: str, exploits: Optional[List[Dict[str, Any]]]) -> bool:
+    """
+    Updates a CVE with information about available public exploits.
+    
+    Args:
+        cve_id (str): The CVE ID to update
+        exploits (list): A list of dictionaries containing exploit information, or None
+        
+    Returns:
+        bool: True if the update was successful, False otherwise
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+        
+        # Convert exploit list to JSON string
+        has_public_exploit = 0
+        exploit_references = None
+        
+        if exploits and len(exploits) > 0:
+            has_public_exploit = 1
+            exploit_references = json.dumps(exploits)
+        
+        # Update the record
+        cursor.execute('''
+        UPDATE cves 
+        SET has_public_exploit = ?, exploit_references = ?
+        WHERE cve_id = ?
+        ''', (has_public_exploit, exploit_references, cve_id))
+        
+        if cursor.rowcount == 0:
+            logger.warning(f"No CVE found with ID {cve_id} for exploit update")
+            return False
+        
+        conn.commit()
+        logger.debug(f"Successfully updated exploit information for {cve_id}: {has_public_exploit} exploits found")
+        return True
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating exploit information for {cve_id}: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating exploit data for {cve_id}: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close() 

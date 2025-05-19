@@ -5,16 +5,20 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os
 import re
+import json
+import time
+from collections import defaultdict
 
 # Add the project root directory to the path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from src.utils.database_handler import get_all_cves_with_details, get_filtered_cves
+from src.utils.database_handler import get_all_cves_with_details, get_filtered_cves, get_cve_details, update_cve_exploit_data
 from src.utils.pdf_generator import generate_cve_report
+from src.clients.nvd_client import fetch_single_cve_details
 
 # Set the page title and add refresh button at the top right
 title_col, refresh_col = st.columns([6, 1])
@@ -46,6 +50,10 @@ kev_filter = st.sidebar.checkbox("Only show CISA KEV entries", value=False)
 
 # Apply search/filters
 search_button = st.sidebar.button("Search", type="primary")
+
+# Add a note about the Live CVE Lookup page
+st.sidebar.markdown("---")
+st.sidebar.info("For detailed lookup of a specific CVE ID, including exploit search, please use the [Live CVE Lookup](Live_CVE_Lookup) page.")
 
 # Load all CVEs with details
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -150,29 +158,32 @@ with col1:
         kev_date = selected_data.get('kev_date_added')
         st.markdown(f"**Added to KEV:** {kev_date.strftime('%Y-%m-%d') if pd.notnull(kev_date) else 'Unknown'}")
 
-    # Add Microsoft information if available
+    # Microsoft-specific information if available
     ms_severity = selected_data.get('microsoft_severity')
     if ms_severity:
-        ms_product = selected_data.get('microsoft_product_family', 'Unknown')
-        ms_specific = selected_data.get('microsoft_product_name', 'Unknown')
-        patch_date = selected_data.get('patch_tuesday_date')
-        
-        # Format Microsoft information with styling based on severity
-        severity_color = {
-            'Critical': 'red',
-            'Important': 'orange',
-            'Moderate': 'blue',
-            'Low': 'green'
-        }.get(ms_severity, 'gray')
-        
-        # Use simplified HTML format to avoid rendering issues
-        ms_info_html = f"""<div style="background-color: rgba(0,0,0,0.05); padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid {severity_color};">
+        try:
+            ms_product = selected_data.get('microsoft_product_family', 'Unknown')
+            ms_specific = selected_data.get('microsoft_product_name', 'Unknown')
+            patch_date = selected_data.get('patch_tuesday_date')
+            
+            # Format Microsoft information with styling based on severity
+            severity_color = {
+                'Critical': 'red',
+                'Important': 'orange',
+                'Moderate': 'blue',
+                'Low': 'green'
+            }.get(ms_severity, 'gray')
+            
+            # Use simplified HTML format to avoid rendering issues
+            ms_info_html = f"""<div style="background-color: rgba(0,0,0,0.05); padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid {severity_color};">
 <span style="font-weight: bold; color: {severity_color};">Microsoft {ms_severity}</span><br>
 <b>Product Family:</b> {ms_product}<br>
 <b>Specific Product:</b> {ms_specific}<br>
 <b>Patch Tuesday:</b> {patch_date.strftime('%Y-%m-%d') if pd.notnull(patch_date) else 'Unknown'}
 </div>"""
-        st.markdown(ms_info_html, unsafe_allow_html=True)
+            st.markdown(ms_info_html, unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Error processing Microsoft information: {str(e)}")
 
 with col2:
     st.markdown("### Description")
@@ -321,6 +332,10 @@ with context_cols[1]:
         {"name": "KEV Factor", "value": 10 if selected_data.get('is_in_kev') else 0},
     ]
     
+    # Add public exploit factor to the risk factors
+    if selected_data.get('has_public_exploit'):
+        risk_factors.append({"name": "Public Exploit", "value": 8.5})  # Value reflects the boost from config
+    
     # Create a horizontal bar chart
     risk_df = pd.DataFrame(risk_factors)
     fig = px.bar(
@@ -335,6 +350,79 @@ with context_cols[1]:
     )
     fig.update_layout(height=250)
     st.plotly_chart(fig, use_container_width=True)
+
+# Public Exploits section
+if selected_data.get('has_public_exploit'):
+    st.markdown("---")
+    st.markdown("### Public Exploits")
+    
+    exploit_references = selected_data.get('exploit_references')
+    
+    # Check if we have exploit information in the right format
+    if exploit_references:
+        try:
+            # If it's a string, try to parse it as JSON
+            if isinstance(exploit_references, str):
+                import json
+                exploit_references = json.loads(exploit_references)
+            
+            # Check if we have a list of exploits
+            if isinstance(exploit_references, list) and len(exploit_references) > 0:
+                st.error(f"⚠️ **{len(exploit_references)} public exploit(s) found for this vulnerability**")
+                
+                # Group exploits by source
+                exploits_by_source = {}
+                for exploit in exploit_references:
+                    source = exploit.get('source', 'Unknown')
+                    if source not in exploits_by_source:
+                        exploits_by_source[source] = []
+                    exploits_by_source[source].append(exploit)
+                
+                # Display exploits by source in expandable sections
+                for source, exploits in exploits_by_source.items():
+                    with st.expander(f"{source} ({len(exploits)})", expanded=True):
+                        for i, exploit in enumerate(exploits):
+                            title = exploit.get('title', 'Unknown Title')
+                            url = exploit.get('url', '#')
+                            exploit_type = exploit.get('type', 'Unknown Type')
+                            published = exploit.get('date_published', 'Unknown')
+                            
+                            # Format the date if it's not "Unknown"
+                            if published != "Unknown":
+                                try:
+                                    published_date = datetime.fromisoformat(published.replace('Z', '+00:00'))
+                                    published = published_date.strftime('%Y-%m-%d')
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Display exploit information in a card-like format
+                            st.markdown(f"""
+                            <div style="border: 1px solid #f63366; border-radius: 5px; padding: 10px; margin-bottom: 10px;">
+                                <h4 style="margin-top:0;">{title}</h4>
+                                <p><strong>Type:</strong> {exploit_type}</p>
+                                <p><strong>Published:</strong> {published}</p>
+                                <a href="{url}" target="_blank" rel="noopener noreferrer">
+                                    <button style="background-color: #f63366; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">
+                                        View Exploit
+                                    </button>
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
+                
+                # Add a warning note
+                st.warning("""
+                **Warning**: The exploits listed above are publicly available and may be used by threat actors. 
+                It is strongly recommended to apply patches or mitigations as soon as possible.
+                """)
+            else:
+                st.info("Exploit information is available but could not be displayed in detail.")
+        except Exception as e:
+            st.error(f"Error processing exploit data: {str(e)}")
+    else:
+        st.info("Public exploits have been found, but detailed information is not available.")
+else:
+    # Don't display anything if no public exploits
+    pass
 
 # Mitigation recommendations
 st.markdown("---")
@@ -367,6 +455,19 @@ else:
     - Address according to normal vulnerability management procedures
     - Apply patches during regular maintenance cycles
     - Document in vulnerability tracking system
+    """)
+
+# If this has public exploits, add specific recommendations
+if selected_data.get('has_public_exploit'):
+    st.error("""
+    ### Public Exploit Mitigation
+    
+    This vulnerability has publicly available exploits, which means:
+    
+    - Attackers can easily weaponize this vulnerability
+    - Patch immediately, even outside regular patching cycles
+    - Consider additional preventive controls like WAF rules or IPS signatures
+    - Increase monitoring for exploitation attempts
     """)
 
 # If this is a KEV, add additional KEV-specific recommendation

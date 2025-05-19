@@ -9,7 +9,8 @@ from src.utils.config import (
     get_gemini_priority_factors,
     get_alert_rules,
     get_kev_boost_factor,
-    get_microsoft_severity_factors
+    get_microsoft_severity_factors,
+    get_public_exploit_boost_factor
 )
 
 # Initialize module logger
@@ -18,12 +19,13 @@ logger = logging.getLogger(__name__)
 def calculate_combined_risk_score(cve_data: Dict) -> float:
     """
     Calculates a combined risk score based on Gemini priority, CVSS score, EPSS data, CISA KEV status,
-    and Microsoft severity rating.
+    Microsoft severity rating, and public exploit availability.
     The score is a weighted combination of these factors, normalized to a 0-1 scale.
     
     Args:
         cve_data (Dict): Dictionary containing CVE data with gemini_priority, cvss_v3_score, 
-                         epss_score, epss_percentile, is_in_kev, and microsoft_severity fields
+                         epss_score, epss_percentile, is_in_kev, microsoft_severity,
+                         and has_public_exploit fields
     
     Returns:
         float: Combined risk score between 0-1, where higher values indicate higher risk
@@ -84,13 +86,22 @@ def calculate_combined_risk_score(cve_data: Dict) -> float:
             combined_score = min(combined_score * (1 + kev_boost), 1.0)
             logger.info(f"Applied KEV boost to {cve_id}, increasing score by {kev_boost*100}%")
         
+        # Apply public exploit boost if a public exploit is available
+        has_public_exploit = cve_data.get('has_public_exploit', False)
+        if has_public_exploit:
+            exploit_boost = get_public_exploit_boost_factor()
+            prev_score = combined_score
+            combined_score = min(combined_score * (1 + exploit_boost), 1.0)
+            logger.info(f"Applied public exploit boost to {cve_id}, increasing score from {prev_score:.4f} to {combined_score:.4f}")
+        
         logger.info(
             f"Risk score for {cve_id}: {combined_score:.4f} "
             f"(Gemini: {priority_factor:.2f}*{w_gemini:.2f}, "
             f"CVSS: {cvss_normalized:.2f}*{w_cvss:.2f}, "
             f"EPSS: {epss_normalized:.4f}*{w_epss:.2f}, "
             f"MS: {ms_factor:.2f}*{w_ms:.2f}, "
-            f"KEV: {is_in_kev})"
+            f"KEV: {is_in_kev}, "
+            f"Public Exploit: {has_public_exploit})"
         )
         
         return combined_score
@@ -125,6 +136,8 @@ def generate_alerts(cve_data: Dict) -> List[str]:
         kev_date_added = cve_data.get('kev_date_added')
         microsoft_severity = cve_data.get('microsoft_severity')
         ms_product = cve_data.get('microsoft_product_family')
+        has_public_exploit = cve_data.get('has_public_exploit', False)
+        exploit_references = cve_data.get('exploit_references', [])
         
         # Rule 1: Critical Exploitability Risk
         if epss_score is not None and epss_score >= rules['critical_epss']:
@@ -155,6 +168,11 @@ def generate_alerts(cve_data: Dict) -> List[str]:
         # Rule 6: Microsoft Critical Severity
         if microsoft_severity == "Critical":
             alerts.append(f"MICROSOFT CRITICAL: {cve_id} is rated as Critical severity by Microsoft for {ms_product}")
+        
+        # Rule 7: Public Exploit Available
+        if has_public_exploit:
+            exploit_count = len(exploit_references) if isinstance(exploit_references, list) else "multiple"
+            alerts.append(f"PUBLIC EXPLOIT: {cve_id} has {exploit_count} public exploit(s) available")
         
         if alerts:
             logger.info(f"Generated {len(alerts)} alerts for {cve_id}")
