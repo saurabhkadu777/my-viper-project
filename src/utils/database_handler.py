@@ -33,6 +33,14 @@ def initialize_db():
     """
     Initializes the database by creating the necessary tables if they don't exist.
     Also ensures that the database directory exists.
+
+    This function safely handles duplicate column errors that may occur when:
+    1. Multiple instances try to add the same column simultaneously
+    2. A column already exists but the script tries to add it again
+    3. Database schema has evolved over time with new columns
+
+    The function will continue execution even if it encounters duplicate column errors,
+    logging a warning rather than failing completely.
     """
     db_path = get_db_file_name()
 
@@ -59,80 +67,53 @@ def initialize_db():
             published_date TEXT,
             gemini_priority TEXT,
             gemini_raw_response TEXT,
-            processed_at TEXT,
-            epss_score REAL,
-            epss_percentile REAL,
-            risk_score REAL,
-            alerts TEXT,
-            is_in_kev INTEGER DEFAULT 0,
-            kev_date_added TEXT,
-            msrc_id TEXT,
-            microsoft_product_family TEXT,
-            microsoft_product_name TEXT,
-            microsoft_severity TEXT,
-            patch_tuesday_date TEXT,
-            has_public_exploit INTEGER DEFAULT 0,
-            exploit_references TEXT
+            processed_at TEXT
         )
         """
         )
 
-        # Check if we need to add the risk_score and alerts columns
-        cursor.execute("PRAGMA table_debug(cves)")
-        columns = [column[1] for column in cursor.fetchall()]
+        # Get existing columns
+        cursor.execute("PRAGMA table_info(cves)")
+        existing_columns = [column[1] for column in cursor.fetchall()]
+        logger.debug(f"Existing columns: {existing_columns}")
 
-        if "risk_score" not in columns:
-            logger.debug("Adding risk_score column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN risk_score REAL")
+        # Define all expected columns and their types
+        column_definitions = {
+            "risk_score": "REAL",
+            "alerts": "TEXT",
+            "is_in_kev": "INTEGER DEFAULT 0",
+            "kev_date_added": "TEXT",
+            "msrc_id": "TEXT",
+            "microsoft_product_family": "TEXT",
+            "microsoft_product_name": "TEXT",
+            "microsoft_severity": "TEXT",
+            "patch_tuesday_date": "TEXT",
+            "has_public_exploit": "INTEGER DEFAULT 0",
+            "exploit_references": "TEXT",
+            "epss_score": "REAL",
+            "epss_percentile": "REAL",
+        }
 
-        if "alerts" not in columns:
-            logger.debug("Adding alerts column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN alerts TEXT")
-
-        # Check if we need to add the KEV columns
-        if "is_in_kev" not in columns:
-            logger.debug("Adding is_in_kev column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN is_in_kev INTEGER DEFAULT 0")
-
-        if "kev_date_added" not in columns:
-            logger.debug("Adding kev_date_added column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN kev_date_added TEXT")
-
-        # Check if we need to add the Microsoft-related columns
-        if "msrc_id" not in columns:
-            logger.debug("Adding msrc_id column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN msrc_id TEXT")
-
-        if "microsoft_product_family" not in columns:
-            logger.debug("Adding microsoft_product_family column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_family TEXT")
-
-        if "microsoft_product_name" not in columns:
-            logger.debug("Adding microsoft_product_name column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_product_name TEXT")
-
-        if "microsoft_severity" not in columns:
-            logger.debug("Adding microsoft_severity column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN microsoft_severity TEXT")
-
-        if "patch_tuesday_date" not in columns:
-            logger.debug("Adding patch_tuesday_date column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN patch_tuesday_date TEXT")
-
-        # Check if we need to add the exploit-related columns
-        if "has_public_exploit" not in columns:
-            logger.debug("Adding has_public_exploit column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN has_public_exploit INTEGER DEFAULT 0")
-
-        if "exploit_references" not in columns:
-            logger.debug("Adding exploit_references column to cves table")
-            cursor.execute("ALTER TABLE cves ADD COLUMN exploit_references TEXT")
+        # Add any missing columns
+        for column, column_type in column_definitions.items():
+            if column not in existing_columns:
+                try:
+                    logger.debug(f"Adding {column} column to cves table")
+                    cursor.execute(f"ALTER TABLE cves ADD COLUMN {column} {column_type}")
+                except sqlite3.OperationalError as e:
+                    # Check if this is a "duplicate column" error
+                    if "duplicate column name" in str(e):
+                        logger.warning(f"Column {column} appears to already exist, skipping: {str(e)}")
+                    else:
+                        # Log other errors but continue with other columns
+                        logger.warning(f"Error adding column {column}: {str(e)}")
 
         conn.commit()
         logger.debug("Database initialized successfully")
     except sqlite3.Error as e:
         logger.error(f"Database initialization error: {str(e)}")
         logger.error(traceback.format_exc())
+        raise
     finally:
         if conn:
             conn.close()

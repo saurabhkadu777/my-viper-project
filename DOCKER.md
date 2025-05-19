@@ -22,17 +22,21 @@ cp .env.example .env
 
 ## Running with Docker Compose
 
+1. Build the application:
 
+```bash
+docker-compose build
+```
 
-1. Start the application:
+2. Start the application:
 
 ```bash
 docker-compose up -d
 ```
 
-2. Access the VIPER dashboard at: http://localhost:8501
+3. Access the VIPER dashboard at: http://localhost:8501
 
-3. Stop the application:
+4. Stop the application:
 
 ```bash
 docker-compose down
@@ -46,6 +50,51 @@ The Docker setup includes a volume mount for the `/app/data` directory, which st
 - Any other persisted data
 
 The data will be stored in the `./data` directory on your host machine.
+
+### Database Path Configuration
+
+It's important to understand how database paths work in the Docker environment:
+
+- Inside the container: The database is located at `/app/data/threat_intel_gemini_mvp.db`
+- On your host machine: The same file is at `./data/threat_intel_gemini_mvp.db` (relative to where you run docker-compose)
+
+This is configured in two places:
+
+1. `docker-compose.yml`: Sets the environment variable `DB_FILE_NAME=/app/data/threat_intel_gemini_mvp.db`
+2. Volume mapping: `-./data:/app/data` makes these paths point to the same files
+
+If you need to run VIPER both inside Docker and directly on your host, be aware that your local `.env` configuration might use a different path. For local development without Docker, consider using `DB_FILE_NAME=data/threat_intel_gemini_mvp.db` (a relative path).
+
+## Database Management
+
+VIPER is designed to automatically handle common database issues like duplicate columns during initialization.
+
+### Database Troubleshooting
+
+If you encounter database issues, you have these options:
+
+1. **Database Reset:**
+
+   If you need to completely reset your database:
+
+   ```bash
+   docker exec -it viper python scripts/reset_database.py
+   ```
+
+2. **Remove Volume and Restart:**
+
+   As a last resort, you can remove the data volume and restart:
+
+   ```bash
+   docker-compose down -v
+   docker-compose up -d
+   ```
+
+### Common Database Errors
+
+**Error: "duplicate column name: risk_score"**
+
+This error occurs when the application tries to add columns that already exist. Recent updates have improved handling of this issue by automatically detecting and skipping duplicate columns. The application will continue normally even if this warning appears during initialization.
 
 ## Environment Variables
 

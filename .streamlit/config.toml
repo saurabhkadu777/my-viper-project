@@ -3,14 +3,14 @@ enableCORS = false
 enableXsrfProtection = false
 
 [browser]
-serverAddress = "0.0.0.0"
+serverAddress = "127.0.0.1"
 serverPort = 8501
 gatherUsageStats = false
 
 [theme]
-# Cyber-themed dark mode with neon highlights
-primaryColor="#00E4FF"        # Neon cyan for primary actions/highlights
-backgroundColor="#0B0C10"     # Dark space background
-secondaryBackgroundColor="#1F2833"  # Slightly lighter background for cards/containers
-textColor="#C5C6C7"           # Light gray text for better contrast
+# Modern theme with red and dark accents
+primaryColor="#FF4B4B"        # Red for primary actions/highlights
+backgroundColor="#0E1117"     # Dark background
+secondaryBackgroundColor="#262730"  # Slightly lighter background for cards/containers
+textColor="#FAFAFA"           # Light text for better contrast
 font="monospace"              # Monospace font for that tech feel

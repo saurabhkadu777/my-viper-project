@@ -21,7 +21,7 @@ logs/*.log
 test_imports.py
 fix_database_issue.py
 test_db_save.py
-
+check_db_path.py
 # System files
 .DS_Store
 Thumbs.db
