@@ -1403,3 +1403,73 @@ def update_cve_exploit_data(cve_id: str, exploits: Optional[List[Dict[str, Any]]
     finally:
         if conn:
             conn.close()
+
+
+def get_high_priority_cves():
+    """
+    Fetches only HIGH priority CVEs from the database.
+    This is useful for focused exploit search to improve performance.
+
+    Returns:
+        list: A list of dictionaries containing CVE data with HIGH priority.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+        SELECT id, cve_id, description, cvss_v3_score, published_date, gemini_priority,
+               processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added,
+               msrc_id, microsoft_product_family, microsoft_product_name,
+               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references
+        FROM cves
+        WHERE gemini_priority = 'HIGH'
+        ORDER BY cvss_v3_score DESC
+        """
+        )
+
+        rows = cursor.fetchall()
+        high_priority_cves = []
+        for row in rows:
+            # Parse exploit_references JSON if available
+            exploit_refs = None
+            if row["exploit_references"]:
+                try:
+                    exploit_refs = json.loads(row["exploit_references"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in exploit_references for {row['cve_id']}")
+
+            high_priority_cves.append(
+                {
+                    "id": row["id"],
+                    "cve_id": row["cve_id"],
+                    "description": row["description"],
+                    "cvss_v3_score": row["cvss_v3_score"],
+                    "published_date": row["published_date"],
+                    "gemini_priority": row["gemini_priority"],
+                    "processed_at": row["processed_at"],
+                    "epss_score": row["epss_score"],
+                    "epss_percentile": row["epss_percentile"],
+                    "is_in_kev": bool(row["is_in_kev"]),
+                    "kev_date_added": row["kev_date_added"],
+                    "microsoft_severity": row["microsoft_severity"],
+                    "microsoft_product_family": row["microsoft_product_family"],
+                    "microsoft_product_name": row["microsoft_product_name"],
+                    "patch_tuesday_date": row["patch_tuesday_date"],
+                    "has_public_exploit": bool(row["has_public_exploit"]),
+                    "exploit_references": exploit_refs,
+                }
+            )
+
+        logger.debug(f"Found {len(high_priority_cves)} HIGH priority CVEs")
+        return high_priority_cves
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching HIGH priority CVEs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
