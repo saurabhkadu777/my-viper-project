@@ -170,6 +170,13 @@ This feature is ideal for:
         # Review and optionally modify other settings in this file as needed.
         ```
 
+## 🐳 Docker Deployment
+
+VIPER can be deployed using Docker for easy setup and management.
+For detailed Docker deployment instructions, database management, and troubleshooting, see [DOCKER.md](DOCKER.md).
+
+
+
 ## ⚙️ Usage
 
 VIPER can be operated in two primary modes:
@@ -181,6 +188,7 @@ Use the CLI to fetch, process, and analyze vulnerability data. The results (high
 ```bash
 python main.py cli --days <NUMBER_OF_DAYS>
 ```
+Days will affect the intensity and performance of outputs.
 
 ### Dashboard
 
@@ -201,6 +209,7 @@ The dashboard provides:
 - CISA KEV catalog integration
 - Microsoft Patch Tuesday analysis
 - Live CVE lookup and real-time analysis
+
 
 ## Project Structure
 
@@ -315,6 +324,35 @@ VIPER includes robust functionality to search GitHub for exploits and proof-of-c
   * Filters results to find genuine exploits using content analysis
   * Includes repository metadata such as star count and descriptions
 
+### Automatic Exploit Scanning
+
+VIPER now automatically searches for public exploits as part of its standard workflow:
+
+1. **Integrated in Main Workflow:**
+   * HIGH priority CVEs are automatically checked for public exploits
+   * Results are stored in the database and considered in risk scoring
+   * Performance-optimized to only search for exploits for the most critical vulnerabilities
+
+2. **Full Database Scanning:**
+   * You can trigger a CVE scan for public exploits with:
+     ```
+     # Scan only HIGH priority CVEs (default, faster)
+     python src/scripts/scan_exploits.py
+
+     # Scan all CVEs regardless of priority (slower but comprehensive)
+     python src/scripts/scan_exploits.py --priority=all
+     ```
+   * Options:
+     - `--priority=high|all` - Which priority level to scan (defaults to 'high')
+     - `--max-cves=100` - Limit scan to a certain number of CVEs
+     - `--delay=2` - Set delay between API calls to avoid rate limiting
+
+3. **Scheduled Scanning:**
+   * For production deployments, consider scheduling regular exploit scans:
+     ```
+     # Example crontab entry (scan HIGH priority CVEs weekly on Sunday at 1:00 AM)
+     0 1 * * 0 cd /path/to/viper && python src/scripts/scan_exploits.py >> logs/exploit_scan_cron.log 2>&1
+     ```
 
 ### GitHub API Configuration
 
@@ -453,41 +491,3 @@ Here's where we're headed:
 * **[ ] Database Optimization/Migration:** For larger deployments, consider migrating from SQLite to a more scalable database like PostgreSQL.
 
 This roadmap is ambitious and will evolve. Community contributions and feedback are highly encouraged as we build VIPER into a powerful open-source CTI tool!
-
-## 🐳 Docker Deployment
-
-VIPER can be deployed using Docker for easy setup and management:
-
-1. **Build and start the container:**
-   ```bash
-   docker-compose up -d
-   ```
-
-2. **Access the VIPER dashboard:**
-   Open http://localhost:8501 in your browser
-
-3. **View logs:**
-   ```bash
-   docker-compose logs viper-app
-   ```
-
-4. **Stop the container:**
-   ```bash
-   docker-compose down
-   ```
-
-For detailed Docker deployment instructions, database management, and troubleshooting, see [DOCKER.md](DOCKER.md).
-
-## Database Management
-
-VIPER is designed to automatically handle common database issues like duplicate columns during initialization. The database structure is maintained internally without requiring manual intervention.
-
-### Database Reset
-
-If you need to completely reset your database:
-
-```bash
-python scripts/reset_database.py
-```
-
-For Docker-specific database management commands, see the [Docker documentation](DOCKER.md).

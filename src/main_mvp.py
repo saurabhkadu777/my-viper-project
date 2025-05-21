@@ -23,8 +23,10 @@ from src.risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, g
 
 # Import configuration getters
 from src.utils.config import (
+    get_exploit_db_api_url,
     get_gemini_api_key,
     get_gemini_concurrent_requests,
+    get_github_token,
     get_log_file_name,
     get_log_level,
     get_nvd_days_published_ago,
@@ -469,6 +471,21 @@ async def enrich_cves_with_exploits(cves_list):
         logger.info("No CVEs to check for public exploits")
         return 0, 0
 
+    # Check if GitHub token is configured
+    github_token = get_github_token()
+    exploit_db_url = get_exploit_db_api_url()
+
+    if not github_token and not exploit_db_url:
+        logger.warning("No exploit search sources configured. Set GITHUB_TOKEN or EXPLOIT_DB_API_URL in .env file.")
+        print("\nWarning: Public exploit search is not configured. Add GITHUB_TOKEN to your .env file.")
+        return 0, 0
+
+    if not github_token:
+        logger.warning("GitHub token not configured. GitHub exploit search will be skipped.")
+        print(
+            "\nNote: GitHub exploit search is disabled. Add GITHUB_TOKEN to your .env file for more comprehensive results."
+        )
+
     logger.info(f"Searching for public exploits for {len(cves_list)} CVEs")
 
     processed_count = 0
@@ -502,7 +519,46 @@ async def enrich_cves_with_exploits(cves_list):
     return processed_count, found_exploits_count
 
 
-def run_cti_feed(days_back=None):
+async def scan_all_cves_for_exploits(max_cves=None, include_processed=False):
+    """
+    Scan all CVEs in the database for public exploits.
+    This is useful for periodic rescanning as new exploits may emerge over time.
+
+    Args:
+        max_cves (int, optional): Maximum number of CVEs to check. If None, checks all CVEs.
+        include_processed (bool, optional): Whether to include CVEs that already have exploit data.
+
+    Returns:
+        tuple: (processed_count, found_exploits_count) tuple
+    """
+    # Get all CVE IDs from the database
+    all_cve_ids = get_all_cve_ids_from_db()
+    logger.info(f"Found {len(all_cve_ids)} total CVEs in the database")
+
+    # Check if GitHub token is configured
+    github_token = get_github_token()
+    exploit_db_url = get_exploit_db_api_url()
+
+    if not github_token and not exploit_db_url:
+        logger.warning("No exploit search sources configured. Set GITHUB_TOKEN or EXPLOIT_DB_API_URL in .env file.")
+        return 0, 0
+
+    if not github_token:
+        logger.warning("GitHub token not configured. GitHub exploit search will be skipped.")
+
+    # If requested, limit the number of CVEs to process
+    if max_cves and len(all_cve_ids) > max_cves:
+        logger.info(f"Limiting scan to {max_cves} CVEs")
+        all_cve_ids = all_cve_ids[:max_cves]
+
+    # Create list of CVE data dictionaries with just the CVE ID
+    cves_to_process = [{"cve_id": cve_id} for cve_id in all_cve_ids]
+
+    # Process the CVEs for exploit data
+    return await enrich_cves_with_exploits(cves_to_process)
+
+
+def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_scan=None):
     """
     Runs the full CTI feed workflow:
     1. Initialize the database
@@ -511,14 +567,18 @@ def run_cti_feed(days_back=None):
     4. Sync with CISA KEV catalog
     5. Sync with Microsoft Patch Tuesday data
     6. Enrich CVEs with EPSS data
-    7. Search for public exploits
-    8. Analyze unprocessed CVEs with Gemini
+    7. Analyze unprocessed CVEs with Gemini
+    8. Search for public exploits (only for HIGH priority CVEs)
     9. Calculate risk scores and generate alerts
     10. Display high/medium priority CVEs and alerts
 
     Args:
         days_back (int, optional): Number of days to look back for CVEs.
             If None, uses the value from configuration.
+        scan_all_exploits (bool, optional): Whether to scan all CVEs in the database
+            for exploits, not just newly added ones. Default is False.
+        max_cves_for_exploit_scan (int, optional): Maximum number of CVEs to check for
+            exploits when scan_all_exploits is True. Default is None (all CVEs).
     """
     try:
         logger.info("Starting VIPER CTI feed workflow")
@@ -595,7 +655,38 @@ def run_cti_feed(days_back=None):
         priority_cves = get_high_medium_priority_cves()
 
         if priority_cves:
-            # Step 9: Calculate risk scores and generate alerts
+            # Step 9: Search for public exploits ONLY for HIGH priority CVEs
+            # Filter for only HIGH priority CVEs to improve performance
+            high_priority_cves = [cve for cve in priority_cves if cve.get("gemini_priority") == "HIGH"]
+
+            if high_priority_cves:
+                logger.info(f"Searching for public exploits for {len(high_priority_cves)} HIGH priority CVEs")
+                print(f"\nSearching for public exploits only for {len(high_priority_cves)} HIGH priority CVEs...")
+                processed_exploit_count, found_exploit_count = asyncio.run(
+                    enrich_cves_with_exploits(high_priority_cves)
+                )
+
+                if processed_exploit_count > 0:
+                    print(
+                        f"\nSearched for public exploits for {processed_exploit_count} HIGH priority CVEs, found exploits for {found_exploit_count} CVEs."
+                    )
+            else:
+                logger.info("No HIGH priority CVEs found, skipping exploit search")
+                print("\nNo HIGH priority CVEs found, skipping exploit search.")
+
+            # Step 8b: Optionally scan all CVEs in the database for exploits if explicitly requested
+            if scan_all_exploits:
+                logger.info("Scanning all CVEs in the database for public exploits (as explicitly requested)")
+                print("\nScanning all CVEs in the database for public exploits. This may take some time...")
+                all_processed_count, all_found_count = asyncio.run(
+                    scan_all_cves_for_exploits(max_cves_for_exploit_scan)
+                )
+                if all_processed_count > 0:
+                    print(
+                        f"\nScanned {all_processed_count} CVEs for public exploits, found exploits for {all_found_count} CVEs."
+                    )
+
+            # Step 10: Calculate risk scores and generate alerts
             logger.info("Calculating risk scores and generating alerts")
             cves_with_alerts_count = asyncio.run(process_risk_scoring_alerts(priority_cves))
 
@@ -606,7 +697,7 @@ def run_cti_feed(days_back=None):
             for cve in priority_cves:
                 display_cve(cve)
 
-            # Step 10: Display CVEs with alerts
+            # Step 11: Display CVEs with alerts
             if cves_with_alerts_count > 0:
                 logger.info("Retrieving and displaying CVEs with alerts")
                 cves_with_alerts = get_cves_with_alerts()
